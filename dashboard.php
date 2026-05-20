@@ -49,7 +49,7 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
                     <li class="nav-item"><a class="nav-link text-warning fw-bold" href="admin_dashboard.php"><i class="fas fa-shield-alt"></i> Panel Admin</a></li>
                 <?php endif; ?>
                 <li class="nav-item"><a class="nav-link active fw-bold" style="color: var(--primary-color);" href="dashboard.php">Beranda</a></li>
-                <li class="nav-item"><a class="nav-link" href="reservasi_saya.php">Tiket Saya</a></li>
+                <li class="nav-item"><a class="nav-link" href="reservasi_saya.php">QR Saya</a></li>
                 <li class="nav-item"><a class="nav-link text-danger fw-bold" href="logout.php">Keluar</a></li>
             </ul>
         </div>
