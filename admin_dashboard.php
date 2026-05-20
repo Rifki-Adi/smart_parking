@@ -33,6 +33,10 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
         .th-sortable:hover { color: var(--primary-color) !important; }
         .icon-sort { opacity: 0.3; margin-left: 5px; font-size: 0.9em; }
         .icon-sort.active { opacity: 1; color: var(--primary-color); }
+        /* Custom scrollbar untuk tabel responsive */
+        .table-responsive::-webkit-scrollbar { height: 8px; }
+        .table-responsive::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .table-responsive::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
     </style>
 </head>
 <body>
@@ -50,8 +54,6 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
             <ul class="navbar-nav ms-auto align-items-center">
                 <li class="nav-item"><a class="nav-link active fw-bold" style="color: var(--primary-color);" href="admin_dashboard.php"><i class="fas fa-desktop me-1"></i> Monitor</a></li>
                 <li class="nav-item"><a class="nav-link fw-bold" href="admin_users.php"><i class="fas fa-users me-1"></i> Pengguna</a></li>
-                <li class="nav-item"><a class="nav-link fw-bold" href="admin_scan.php"><i class="fas fa-qrcode me-1"></i> Verifikasi QR</a></li>
-                <li class="nav-item"><a class="nav-link" href="export_excel.php"><i class="fas fa-file-excel text-success me-1"></i> Excel</a></li>
                 <li class="nav-item ms-3"><a class="btn btn-outline-danger btn-sm rounded-pill px-4 fw-bold" href="logout.php">Keluar</a></li>
             </ul>
         </div>
@@ -80,7 +82,10 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
             <div class="card card-custom p-4 border-0">
                 <div class="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center mb-4 gap-3">
                     <h5 class="fw-bold mb-0" style="color: var(--primary-color);">Laporan Transaksi (Live)</h5>
-                    <div class="d-flex flex-wrap gap-2">
+                    <div class="d-flex flex-wrap gap-2 w-100 justify-content-md-end">
+                        <a href="export_excel.php" class="btn btn-sm btn-success fw-bold shadow-sm d-flex align-items-center px-3" title="Download Data ke Excel">
+                            <i class="fas fa-file-excel me-1"></i> Export Excel
+                        </a>
                         <input type="date" id="filter_tgl" class="form-control form-control-sm border-primary text-primary shadow-sm fw-bold w-auto" onchange="resetPageAndFetch()">
                         <select id="filter_tipe" class="form-select form-select-sm w-auto shadow-sm fw-bold border-primary text-primary" onchange="resetPageAndFetch()">
                             <option value="">Semua Tipe</option>
@@ -95,19 +100,20 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
                     </div>
                 </div>
                 
-                <div class="table-responsive">
-                    <table class="table table-hover align-middle">
+                <div class="table-responsive border rounded-3 shadow-sm pb-2">
+                    <table class="table table-hover align-middle mb-0" style="white-space: nowrap; min-width: 700px;">
                         <thead class="table-light">
                             <tr>
-                                <th class="text-muted small text-uppercase th-sortable" onclick="setSortCol('created_at')">Hari & Tanggal <i id="icon-sort-created_at" class="fas fa-sort-down icon-sort active"></i></th>
-                                <th class="text-muted small text-uppercase th-sortable" onclick="setSortCol('nama')">Pengguna <i id="icon-sort-nama" class="fas fa-sort icon-sort"></i></th>
-                                <th class="text-muted small text-uppercase th-sortable" onclick="setSortCol('tipe')">Tipe Aksi <i id="icon-sort-tipe" class="fas fa-sort icon-sort"></i></th>
-                                <th class="text-muted small text-uppercase text-end th-sortable" onclick="setSortCol('jumlah')">Jumlah <i id="icon-sort-jumlah" class="fas fa-sort icon-sort"></i></th>
+                                <th class="text-muted small text-uppercase th-sortable px-3 py-3" onclick="setSortCol('created_at')">Hari & Tanggal <i id="icon-sort-created_at" class="fas fa-sort-down icon-sort active"></i></th>
+                                <th class="text-muted small text-uppercase th-sortable py-3" onclick="setSortCol('nama')">Pengguna <i id="icon-sort-nama" class="fas fa-sort icon-sort"></i></th>
+                                <th class="text-muted small text-uppercase th-sortable py-3" onclick="setSortCol('tipe')">Tipe Aksi <i id="icon-sort-tipe" class="fas fa-sort icon-sort"></i></th>
+                                <th class="text-muted small text-uppercase text-end th-sortable px-3 py-3" onclick="setSortCol('jumlah')">Jumlah <i id="icon-sort-jumlah" class="fas fa-sort icon-sort"></i></th>
                             </tr>
                         </thead>
                         <tbody id="trx_table_body"></tbody>
                     </table>
                 </div>
+                
                 <nav class="mt-4" id="pagination_container"></nav>
             </div>
         </div>
@@ -183,24 +189,59 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
             const res = await fetch(`api.php?action=get_dashboard_data&p=${currentPage}&tipe=${fTipe}&tgl=${fTgl}&sort_col=${currentSortCol}&sort_dir=${currentSortDir}&_=${Date.now()}`);
             const data = await res.json();
             document.getElementById('total_user_card').innerText = data.total_user; document.getElementById('total_saldo_card').innerText = 'Rp ' + data.total_saldo.toLocaleString('id-ID');
+            
             let tbody = document.getElementById('trx_table_body'); let html = '';
-            if (data.transactions.length === 0) { html = '<tr><td colspan="4" class="text-center py-4 text-muted">Tidak ada transaksi pada filter ini.</td></tr>'; } else {
+            if (data.transactions.length === 0) { 
+                html = '<tr><td colspan="4" class="text-center py-4 text-muted">Tidak ada transaksi pada filter ini.</td></tr>'; 
+            } else {
                 data.transactions.forEach(t => {
                     let badge = 'bg-secondary'; let label = t.tipe.toUpperCase();
                     if(t.tipe === 'topup') { badge = 'bg-success'; label = 'Top Up'; } if(t.tipe === 'reservasi') { badge = 'bg-primary'; label = 'Reservasi'; } if(t.tipe === 'parkir') { badge = 'bg-info'; label = 'Check-In'; } if(t.tipe === 'checkout') { badge = 'bg-dark'; label = 'Check-Out'; } if(t.tipe === 'batal') { badge = 'bg-warning'; label = 'Batal Manual'; } if(t.tipe === 'hangus') { badge = 'bg-danger'; label = 'Hangus'; } if(t.tipe === 'penalty') { badge = 'bg-danger'; label = 'Hangus (Data Lama)'; }
                     let amount = parseInt(t.jumlah); let prefix = 'Rp '; let colorTxt = 'fw-bold';
                     if (t.tipe === 'topup' && amount > 0) { prefix = '+ Rp '; colorTxt = 'text-success fw-bold'; } else if (amount > 0) { prefix = '- Rp '; colorTxt = 'text-danger fw-bold'; } else { prefix = 'Rp '; colorTxt = 'text-muted fw-bold'; }
-                    html += `<tr><td><span class="d-block fw-bold small">${t.hari_indo}, ${t.tgl_indo}</span><span class="text-muted small"><i class="fas fa-clock me-1"></i>${t.jam_indo} WIB</span></td><td><span class="fw-bold d-block">${t.nama}</span><span class="badge bg-light text-dark border mt-1">${t.plat_nomor}</span></td><td><span class="badge ${badge} bg-opacity-10 text-${badge.replace('bg-','')} border border-${badge.replace('bg-','')}">${label}</span></td><td class="text-end ${colorTxt}">${prefix}${amount.toLocaleString('id-ID')}</td></tr>`;
+                    html += `<tr>
+                                <td class="px-3"><span class="d-block fw-bold small">${t.hari_indo}, ${t.tgl_indo}</span><span class="text-muted small"><i class="fas fa-clock me-1"></i>${t.jam_indo} WIB</span></td>
+                                <td><span class="fw-bold d-block">${t.nama}</span><span class="badge bg-light text-dark border mt-1">${t.plat_nomor}</span></td>
+                                <td><span class="badge ${badge} bg-opacity-10 text-${badge.replace('bg-','')} border border-${badge.replace('bg-','')}">${label}</span></td>
+                                <td class="text-end px-3 ${colorTxt}">${prefix}${amount.toLocaleString('id-ID')}</td>
+                            </tr>`;
                 });
-            } tbody.innerHTML = html;
+            } 
+            tbody.innerHTML = html;
+            
+            // PERBAIKAN SMART PAGINATION 
             let pagContainer = document.getElementById('pagination_container');
             if (data.total_pages > 1) {
-                let pHtml = '<ul class="pagination justify-content-center mb-0">';
-                pHtml += `<li class="page-item ${data.current_page <= 1 ? 'disabled' : ''}"><a class="page-link shadow-sm border-0" href="#" onclick="changePage(${data.current_page - 1}); return false;">Sebelumnya</a></li>`;
-                for (let i = 1; i <= data.total_pages; i++) { pHtml += `<li class="page-item ${data.current_page === i ? 'active' : ''}"><a class="page-link shadow-sm border-0" href="#" onclick="changePage(${i}); return false;">${i}</a></li>`; }
-                pHtml += `<li class="page-item ${data.current_page >= data.total_pages ? 'disabled' : ''}"><a class="page-link shadow-sm border-0" href="#" onclick="changePage(${data.current_page + 1}); return false;">Selanjutnya</a></li></ul>`;
+                let pHtml = '<ul class="pagination pagination-sm flex-wrap justify-content-center mb-0 gap-1">';
+                
+                // Tombol Prev
+                pHtml += `<li class="page-item ${data.current_page <= 1 ? 'disabled' : ''}"><a class="page-link shadow-sm border-0 rounded" href="#" onclick="changePage(${data.current_page - 1}); return false;">&laquo; Prev</a></li>`;
+                
+                // Logika pembatasan nomor halaman (Tampil Maksimal 5 Kotak Berdekatan)
+                let startPage = Math.max(1, data.current_page - 2);
+                let endPage = Math.min(data.total_pages, data.current_page + 2);
+                
+                if (startPage > 1) {
+                    pHtml += `<li class="page-item"><a class="page-link shadow-sm border-0 rounded" href="#" onclick="changePage(1); return false;">1</a></li>`;
+                    if (startPage > 2) pHtml += `<li class="page-item disabled"><span class="page-link shadow-sm border-0 rounded bg-light text-muted">...</span></li>`;
+                }
+                
+                for (let i = startPage; i <= endPage; i++) { 
+                    pHtml += `<li class="page-item ${data.current_page === i ? 'active' : ''}"><a class="page-link shadow-sm border-0 rounded" href="#" onclick="changePage(${i}); return false;">${i}</a></li>`; 
+                }
+                
+                if (endPage < data.total_pages) {
+                    if (endPage < data.total_pages - 1) pHtml += `<li class="page-item disabled"><span class="page-link shadow-sm border-0 rounded bg-light text-muted">...</span></li>`;
+                    pHtml += `<li class="page-item"><a class="page-link shadow-sm border-0 rounded" href="#" onclick="changePage(${data.total_pages}); return false;">${data.total_pages}</a></li>`;
+                }
+                
+                // Tombol Next
+                pHtml += `<li class="page-item ${data.current_page >= data.total_pages ? 'disabled' : ''}"><a class="page-link shadow-sm border-0 rounded" href="#" onclick="changePage(${data.current_page + 1}); return false;">Next &raquo;</a></li></ul>`;
+                
                 pagContainer.innerHTML = pHtml;
-            } else { pagContainer.innerHTML = ''; }
+            } else { 
+                pagContainer.innerHTML = ''; 
+            }
         } catch (e) {}
     }
     fetchDashboardData(); setInterval(fetchDashboardData, 2000);
