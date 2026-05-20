@@ -33,7 +33,6 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
         .th-sortable:hover { color: var(--primary-color) !important; }
         .icon-sort { opacity: 0.3; margin-left: 5px; font-size: 0.9em; }
         .icon-sort.active { opacity: 1; color: var(--primary-color); }
-        /* Custom scrollbar untuk tabel responsive */
         .table-responsive::-webkit-scrollbar { height: 8px; }
         .table-responsive::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
         .table-responsive::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
@@ -80,13 +79,20 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
             </div>
 
             <div class="card card-custom p-4 border-0">
-                <div class="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center mb-4 gap-3">
-                    <h5 class="fw-bold mb-0" style="color: var(--primary-color);">Laporan Transaksi (Live)</h5>
-                    <div class="d-flex flex-wrap gap-2 w-100 justify-content-md-end">
+                <div class="d-flex flex-column flex-xl-row justify-content-between align-items-start align-items-xl-center mb-4 gap-3">
+                    <h5 class="fw-bold mb-0" style="color: var(--primary-color);">Laporan Transaksi</h5>
+                    <div class="d-flex flex-wrap gap-2 w-100 justify-content-xl-end align-items-center">
                         <a href="export_excel.php" class="btn btn-sm btn-success fw-bold shadow-sm d-flex align-items-center px-3" title="Download Data ke Excel">
-                            <i class="fas fa-file-excel me-1"></i> Export Excel
+                            <i class="fas fa-file-excel me-1"></i> Excel
                         </a>
-                        <input type="date" id="filter_tgl" class="form-control form-control-sm border-primary text-primary shadow-sm fw-bold w-auto" onchange="resetPageAndFetch()">
+                        
+                        <div class="input-group input-group-sm w-auto shadow-sm">
+                            <span class="input-group-text bg-light border-primary fw-bold text-primary">Dari</span>
+                            <input type="date" id="filter_tgl_mulai" class="form-control border-primary text-primary fw-bold" onchange="resetPageAndFetch()">
+                            <span class="input-group-text bg-light border-primary fw-bold text-primary">s/d</span>
+                            <input type="date" id="filter_tgl_selesai" class="form-control border-primary text-primary fw-bold" onchange="resetPageAndFetch()">
+                        </div>
+
                         <select id="filter_tipe" class="form-select form-select-sm w-auto shadow-sm fw-bold border-primary text-primary" onchange="resetPageAndFetch()">
                             <option value="">Semua Tipe</option>
                             <option value="topup">Top Up Saldo</option>
@@ -128,47 +134,23 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
             const data = await res.json();
             document.getElementById('header-kapasitas').innerText = `Live Slot Monitor (Terisi: ${data.terpakai} / ${data.total})`;
             let htmlContainer = '';
-            
             data.slots.forEach(slot => {
                 let innerHtml = `<i class="fas fa-car fa-2x mb-1 car-icon"></i><h6 class="fw-bold mb-0">Slot ${slot.slot_nomor}</h6>`;
                 let borderState = slot.state;
-                
                 if (slot.user_data) {
                     if (slot.user_data.is_parkir) {
-                        let namaText = slot.user_data.nama;
-                        let platText = slot.user_data.plat_nomor;
-                        let bgClass = (namaText === 'Tidak Diketahui') ? 'bg-dark' : 'bg-danger';
-                        
-                        innerHtml += `
-                            <div class="mt-2 pt-2 border-top border-danger small">
-                                <b class="d-block text-truncate text-danger">${namaText}</b>
-                                <span class="badge bg-light text-dark border border-danger mt-1 mb-1">${platText}</span><br>
-                                <span class="badge ${bgClass} mt-1 w-100 shadow-sm"><i class="fas fa-parking me-1"></i>SEDANG PARKIR</span>
-                            </div>`;
+                        let namaText = slot.user_data.nama; let platText = slot.user_data.plat_nomor; let bgClass = (namaText === 'Tidak Diketahui') ? 'bg-dark' : 'bg-danger';
+                        innerHtml += `<div class="mt-2 pt-2 border-top border-danger small"><b class="d-block text-truncate text-danger">${namaText}</b><span class="badge bg-light text-dark border border-danger mt-1 mb-1">${platText}</span><br><span class="badge ${bgClass} mt-1 w-100 shadow-sm"><i class="fas fa-parking me-1"></i>SEDANG PARKIR</span></div>`;
                     } else {
                         if (slot.user_data.status === 'reserved_masuk') {
                             borderState = 'slot-reserved-admin';
-                            innerHtml += `
-                            <div class="mt-2 pt-2 border-top border-warning small">
-                                <b class="d-block text-truncate" style="color:#b45309;">${slot.user_data.nama}</b>
-                                <span class="badge bg-warning text-dark mt-1 mb-1">${slot.user_data.plat_nomor}</span><br>
-                                <span class="badge bg-warning text-dark mt-1 w-100 shadow-sm"><i class="fas fa-bookmark me-1"></i>RESERVED</span>
-                            </div>`;
+                            innerHtml += `<div class="mt-2 pt-2 border-top border-warning small"><b class="d-block text-truncate" style="color:#b45309;">${slot.user_data.nama}</b><span class="badge bg-warning text-dark mt-1 mb-1">${slot.user_data.plat_nomor}</span><br><span class="badge bg-warning text-dark mt-1 w-100 shadow-sm"><i class="fas fa-bookmark me-1"></i>RESERVED</span></div>`;
                         } else {
-                            let sisa = slot.user_data.sisa_waktu;
-                            let m = Math.floor(sisa / 60); let s = sisa % 60;
-                            let textWaktu = sisa > 0 ? `Sisa 0${m}:${s < 10 ? '0'+s : s}` : 'Habis / Batal';
-                            let bgWaktu = sisa > 0 ? 'bg-danger' : 'bg-secondary';
-                            innerHtml += `
-                                <div class="mt-2 pt-2 border-top border-warning small">
-                                    <b class="d-block text-truncate" style="color:#b45309;">${slot.user_data.nama}</b>
-                                    <span class="badge bg-warning text-dark mt-1 mb-1">${slot.user_data.plat_nomor}</span><br>
-                                    <span class="badge ${bgWaktu} mt-1 w-100 shadow-sm"><i class="fas fa-clock me-1"></i>${textWaktu}</span>
-                                </div>`;
+                            let sisa = slot.user_data.sisa_waktu; let m = Math.floor(sisa / 60); let s = sisa % 60; let textWaktu = sisa > 0 ? `Sisa 0${m}:${s < 10 ? '0'+s : s}` : 'Habis / Batal'; let bgWaktu = sisa > 0 ? 'bg-danger' : 'bg-secondary';
+                            innerHtml += `<div class="mt-2 pt-2 border-top border-warning small"><b class="d-block text-truncate" style="color:#b45309;">${slot.user_data.nama}</b><span class="badge bg-warning text-dark mt-1 mb-1">${slot.user_data.plat_nomor}</span><br><span class="badge ${bgWaktu} mt-1 w-100 shadow-sm"><i class="fas fa-clock me-1"></i>${textWaktu}</span></div>`;
                         }
                     }
                 }
-                
                 htmlContainer += `<div class="col"><div id="slot-box-${slot.slot_nomor}" class="slot-card p-3 border rounded-4 text-center ${borderState}" style="min-height: 140px;">${innerHtml}</div></div>`;
             });
             document.getElementById('slot-area-container').innerHTML = htmlContainer;
@@ -180,19 +162,33 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
     function setSortCol(colName) { if (currentSortCol === colName) { currentSortDir = (currentSortDir === 'asc') ? 'desc' : 'asc'; } else { currentSortCol = colName; currentSortDir = 'asc'; } updateSortIcons(); resetPageAndFetch(); }
     function updateSortIcons() { const cols = ['created_at', 'nama', 'tipe', 'jumlah']; cols.forEach(c => { let icon = document.getElementById('icon-sort-' + c); icon.className = 'icon-sort'; if (c === currentSortCol) { icon.classList.add('fas'); icon.classList.add(currentSortDir === 'asc' ? 'fa-sort-up' : 'fa-sort-down'); icon.classList.add('active'); } else { icon.classList.add('fas', 'fa-sort'); } }); }
     function resetPageAndFetch() { currentPage = 1; fetchDashboardData(); }
-    function clearFilters() { document.getElementById('filter_tipe').value = ''; document.getElementById('filter_tgl').value = ''; currentSortCol = 'created_at'; currentSortDir = 'desc'; updateSortIcons(); resetPageAndFetch(); }
+    
+    // PERUBAHAN: Fungsi clear filter untuk 2 tanggal
+    function clearFilters() { 
+        document.getElementById('filter_tipe').value = ''; 
+        document.getElementById('filter_tgl_mulai').value = ''; 
+        document.getElementById('filter_tgl_selesai').value = ''; 
+        currentSortCol = 'created_at'; 
+        currentSortDir = 'desc'; 
+        updateSortIcons(); 
+        resetPageAndFetch(); 
+    }
+    
     function changePage(page) { currentPage = page; fetchDashboardData(); }
 
     async function fetchDashboardData() {
-        let fTipe = document.getElementById('filter_tipe').value; let fTgl = document.getElementById('filter_tgl').value;
+        let fTipe = document.getElementById('filter_tipe').value; 
+        let fTglMulai = document.getElementById('filter_tgl_mulai').value;
+        let fTglSelesai = document.getElementById('filter_tgl_selesai').value;
         try {
-            const res = await fetch(`api.php?action=get_dashboard_data&p=${currentPage}&tipe=${fTipe}&tgl=${fTgl}&sort_col=${currentSortCol}&sort_dir=${currentSortDir}&_=${Date.now()}`);
+            // PERUBAHAN: URL API SEKARANG MEMBAWA tgl_mulai DAN tgl_selesai
+            const res = await fetch(`api.php?action=get_dashboard_data&p=${currentPage}&tipe=${fTipe}&tgl_mulai=${fTglMulai}&tgl_selesai=${fTglSelesai}&sort_col=${currentSortCol}&sort_dir=${currentSortDir}&_=${Date.now()}`);
             const data = await res.json();
             document.getElementById('total_user_card').innerText = data.total_user; document.getElementById('total_saldo_card').innerText = 'Rp ' + data.total_saldo.toLocaleString('id-ID');
             
             let tbody = document.getElementById('trx_table_body'); let html = '';
             if (data.transactions.length === 0) { 
-                html = '<tr><td colspan="4" class="text-center py-4 text-muted">Tidak ada transaksi pada filter ini.</td></tr>'; 
+                html = '<tr><td colspan="4" class="text-center py-4 text-muted">Tidak ada transaksi pada rentang tanggal ini.</td></tr>'; 
             } else {
                 data.transactions.forEach(t => {
                     let badge = 'bg-secondary'; let label = t.tipe.toUpperCase();
@@ -209,39 +205,17 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
             } 
             tbody.innerHTML = html;
             
-            // PERBAIKAN SMART PAGINATION 
             let pagContainer = document.getElementById('pagination_container');
             if (data.total_pages > 1) {
                 let pHtml = '<ul class="pagination pagination-sm flex-wrap justify-content-center mb-0 gap-1">';
-                
-                // Tombol Prev
                 pHtml += `<li class="page-item ${data.current_page <= 1 ? 'disabled' : ''}"><a class="page-link shadow-sm border-0 rounded" href="#" onclick="changePage(${data.current_page - 1}); return false;">&laquo; Prev</a></li>`;
-                
-                // Logika pembatasan nomor halaman (Tampil Maksimal 5 Kotak Berdekatan)
-                let startPage = Math.max(1, data.current_page - 2);
-                let endPage = Math.min(data.total_pages, data.current_page + 2);
-                
-                if (startPage > 1) {
-                    pHtml += `<li class="page-item"><a class="page-link shadow-sm border-0 rounded" href="#" onclick="changePage(1); return false;">1</a></li>`;
-                    if (startPage > 2) pHtml += `<li class="page-item disabled"><span class="page-link shadow-sm border-0 rounded bg-light text-muted">...</span></li>`;
-                }
-                
-                for (let i = startPage; i <= endPage; i++) { 
-                    pHtml += `<li class="page-item ${data.current_page === i ? 'active' : ''}"><a class="page-link shadow-sm border-0 rounded" href="#" onclick="changePage(${i}); return false;">${i}</a></li>`; 
-                }
-                
-                if (endPage < data.total_pages) {
-                    if (endPage < data.total_pages - 1) pHtml += `<li class="page-item disabled"><span class="page-link shadow-sm border-0 rounded bg-light text-muted">...</span></li>`;
-                    pHtml += `<li class="page-item"><a class="page-link shadow-sm border-0 rounded" href="#" onclick="changePage(${data.total_pages}); return false;">${data.total_pages}</a></li>`;
-                }
-                
-                // Tombol Next
+                let startPage = Math.max(1, data.current_page - 2); let endPage = Math.min(data.total_pages, data.current_page + 2);
+                if (startPage > 1) { pHtml += `<li class="page-item"><a class="page-link shadow-sm border-0 rounded" href="#" onclick="changePage(1); return false;">1</a></li>`; if (startPage > 2) pHtml += `<li class="page-item disabled"><span class="page-link shadow-sm border-0 rounded bg-light text-muted">...</span></li>`; }
+                for (let i = startPage; i <= endPage; i++) { pHtml += `<li class="page-item ${data.current_page === i ? 'active' : ''}"><a class="page-link shadow-sm border-0 rounded" href="#" onclick="changePage(${i}); return false;">${i}</a></li>`; }
+                if (endPage < data.total_pages) { if (endPage < data.total_pages - 1) pHtml += `<li class="page-item disabled"><span class="page-link shadow-sm border-0 rounded bg-light text-muted">...</span></li>`; pHtml += `<li class="page-item"><a class="page-link shadow-sm border-0 rounded" href="#" onclick="changePage(${data.total_pages}); return false;">${data.total_pages}</a></li>`; }
                 pHtml += `<li class="page-item ${data.current_page >= data.total_pages ? 'disabled' : ''}"><a class="page-link shadow-sm border-0 rounded" href="#" onclick="changePage(${data.current_page + 1}); return false;">Next &raquo;</a></li></ul>`;
-                
                 pagContainer.innerHTML = pHtml;
-            } else { 
-                pagContainer.innerHTML = ''; 
-            }
+            } else { pagContainer.innerHTML = ''; }
         } catch (e) {}
     }
     fetchDashboardData(); setInterval(fetchDashboardData, 2000);
