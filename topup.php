@@ -80,12 +80,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
                 <form method="POST" id="formTopup">
                     <div class="row g-2 mb-4">
-                        <div class="col-4"><button type="button" class="btn btn-outline-primary w-100 fw-bold small py-2" onclick="setNominal(50000)">50K</button></div>
-                        <div class="col-4"><button type="button" class="col-4 btn btn-outline-primary w-100 fw-bold small py-2" onclick="setNominal(100000)">100K</button></div>
-                        <div class="col-4"><button type="button" class="btn btn-outline-primary w-100 fw-bold small py-2" onclick="setNominal(200000)">200K</button></div>
-                        <div class="col-4"><button type="button" class="btn btn-outline-primary w-100 fw-bold small py-2" onclick="setNominal(500000)">500K</button></div>
-                        <div class="col-4"><button type="button" class="btn btn-outline-primary w-100 fw-bold small py-2" onclick="setNominal(1000000)">1M</button></div>
-                        <div class="col-4"><button type="button" class="btn btn-outline-primary w-100 fw-bold small py-2" onclick="setNominal(5000000)">5M</button></div>
+                        <div class="col-6"><button type="button" class="btn btn-outline-primary w-100 fw-bold small py-2" onclick="setNominal(50000)">Rp 50.000</button></div>
+                        <div class="col-6"><button type="button" class="btn btn-outline-primary w-100 fw-bold small py-2" onclick="setNominal(100000)">Rp 100.000</button></div>
+                        <div class="col-6"><button type="button" class="btn btn-outline-primary w-100 fw-bold small py-2" onclick="setNominal(200000)">Rp 200.000</button></div>
+                        <div class="col-6"><button type="button" class="btn btn-outline-primary w-100 fw-bold small py-2" onclick="setNominal(500000)">Rp 500.000</button></div>
+                        <div class="col-6"><button type="button" class="btn btn-outline-primary w-100 fw-bold small py-2" onclick="setNominal(1000000)">Rp 1.000.000</button></div>
+                        <div class="col-6"><button type="button" class="btn btn-outline-primary w-100 fw-bold small py-2" onclick="setNominal(5000000)">Rp 5.000.000</button></div>
                     </div>
 
                     <div class="mb-4 text-start">
@@ -95,6 +95,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                             <input type="number" id="inputNominal" name="nominal" class="form-control border-start-0 fw-bold fs-5" 
                                    placeholder="0" required min="10000" max="5000000" style="border-radius: 0 12px 12px 0;">
                         </div>
+                        <div class="form-text text-danger mt-1 ms-1 fw-bold">* Minimal top up Rp 10.000</div>
                     </div>
                     
                     <button type="submit" class="btn btn-primary w-100 py-3 rounded-pill fw-bold fs-5 shadow-sm">
