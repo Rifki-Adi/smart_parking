@@ -24,11 +24,15 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
     $plat_edit = strtoupper(trim($_POST['plat_nomor']));
     $saldo_edit = (int)$_POST['saldo'];
     $nohp_edit = trim($_POST['no_hp']);
+    
+    // LOGIKA BARU: Otomatis buat ulang Token Stiker berdasarkan Plat yang baru diedit
+    $qr_permanen_edit = "STIKER-" . $plat_edit;
 
     try {
-        $stmt = $conn->prepare("UPDATE profiles SET nama = ?, plat_nomor = ?, no_hp = ?, saldo = ? WHERE id = ? AND role = 'user'");
-        $stmt->execute([$nama_edit, $plat_edit, $nohp_edit, $saldo_edit, $id_edit]);
-        $_SESSION['success_msg'] = "Data pengguna berhasil diperbarui!";
+        // PERUBAHAN: Tambahkan kolom qr_token_permanen di query SQL
+        $stmt = $conn->prepare("UPDATE profiles SET nama = ?, plat_nomor = ?, no_hp = ?, saldo = ?, qr_token_permanen = ? WHERE id = ? AND role = 'user'");
+        $stmt->execute([$nama_edit, $plat_edit, $nohp_edit, $saldo_edit, $qr_permanen_edit, $id_edit]);
+        $_SESSION['success_msg'] = "Data pengguna dan token stiker berhasil diperbarui!";
     } catch (Exception $e) { $_SESSION['error_msg'] = "Gagal memperbarui data pengguna."; }
     header("Location: admin_users.php"); exit;
 }
