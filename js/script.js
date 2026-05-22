@@ -33,7 +33,6 @@ async function fetchLiveSlots() {
     }
 }
 
-// PERBAIKAN: Panggil fungsi ini seketika agar tombol langsung muncul tanpa menunggu 2.5 detik
 if (document.getElementById('slot-area-container')) { 
     fetchLiveSlots(); 
     setInterval(fetchLiveSlots, 2500); 
@@ -79,7 +78,6 @@ async function bookingSlot(nomor) {
             });
             fetchLiveSlots(); 
         } else { 
-            // Menampilkan error jelas (misal: Saldo kurang / Limit 1 Reservasi)
             Swal.fire('Gagal!', data.message, 'error');
         }
     } catch (e) { Swal.fire('Error!', 'Koneksi ke server bermasalah.', 'error'); }
@@ -175,5 +173,47 @@ async function downloadQR(kode_atau_token, tipe) {
         Swal.fire({ title: 'Tersimpan!', text: 'QR Code diunduh ke perangkat Anda.', icon: 'success', timer: 2000, showConfirmButton: false });
     } catch (e) { 
         Swal.fire('Gagal!', 'Terjadi masalah saat mengunduh gambar.', 'error'); 
+    }
+}
+
+// ==========================================
+// FITUR BARU: FORMAT RUPIAH OTOMATIS (TOP UP)
+// ==========================================
+function formatRupiahManual(inputElement) {
+    let angka_asli = inputElement.value.replace(/[^0-9]/g, ''); // Buang semua huruf/titik
+    
+    // Simpan angka asli ke input tersembunyi agar Database PHP tidak error
+    let hiddenInput = document.getElementById('nominal_asli');
+    if (hiddenInput) {
+        hiddenInput.value = angka_asli;
+    }
+
+    // Pasang titik
+    let sisa = angka_asli.length % 3;
+    let rupiah = angka_asli.substr(0, sisa);
+    let ribuan = angka_asli.substr(sisa).match(/\d{3}/g);
+
+    if (ribuan) {
+        let separator = sisa ? '.' : '';
+        rupiah += separator + ribuan.join('.');
+    }
+    
+    // Tampilkan di layar
+    inputElement.value = rupiah;
+}
+
+// Menimpa fungsi setNominal bawaan
+function setNominal(angka) {
+    let inputTampil = document.getElementById('inputNominal');
+    let inputAsli = document.getElementById('nominal_asli');
+    
+    if (inputTampil && inputAsli) {
+        inputAsli.value = angka;
+        // Format otomatis
+        let sisa = angka.toString().length % 3;
+        let rupiah = angka.toString().substr(0, sisa);
+        let ribuan = angka.toString().substr(sisa).match(/\d{3}/g);
+        if (ribuan) rupiah += (sisa ? '.' : '') + ribuan.join('.');
+        inputTampil.value = rupiah;
     }
 }
