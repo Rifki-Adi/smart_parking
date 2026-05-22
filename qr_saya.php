@@ -24,6 +24,7 @@ $qr_url = "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=" . $qr
 <head>
     <meta charset="UTF-8">
     <title>QR Saya - Smart Parking</title>
+    <link rel="icon" href="logo 1.png" type="image/png">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css">
 </head>
