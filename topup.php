@@ -57,7 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 <nav class="navbar navbar-expand-lg sticky-top mb-4 py-2">
     <div class="container">
         <a class="navbar-brand d-flex align-items-center" href="dashboard.php">
-            <img src="Logo.png" alt="Smart Parking Logo" style="height: 80px; width: auto;">
+            <img src="logo 1.png" alt="Smart Parking Logo" style="height: 80px; width: auto;">
         </a>
         <div class="ms-auto">
             <a class="btn btn-outline-secondary btn-sm rounded-pill px-3 fw-bold" href="dashboard.php">
@@ -93,8 +93,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                         <label class="small fw-bold text-muted ms-1 mb-2">Input Nominal Manual</label>
                         <div class="input-group">
                             <span class="input-group-text bg-white fw-bold border-end-0" style="border-radius: 12px 0 0 12px;">Rp</span>
-                            <input type="number" id="inputNominal" name="nominal" class="form-control border-start-0 fw-bold fs-5" 
-                                   placeholder="0" required min="10000" max="5000000" style="border-radius: 0 12px 12px 0;">
+                            
+                            <input type="hidden" name="nominal" id="inputNominalReal">
+                            
+                            <input type="text" id="inputNominalVisible" class="form-control border-start-0 fw-bold fs-5" 
+                                   placeholder="0" required style="border-radius: 0 12px 12px 0;" autocomplete="off">
                         </div>
                         <div class="form-text text-danger mt-1 ms-1 fw-bold">* Minimal top up Rp 10.000</div>
                     </div>
@@ -109,9 +112,58 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 </div>
 
 <script>
-    function setNominal(angka) {
-        document.getElementById('inputNominal').value = angka;
+    const inputVisible = document.getElementById('inputNominalVisible');
+    const inputReal = document.getElementById('inputNominalReal');
+    const formTopup = document.getElementById('formTopup');
+
+    // Fungsi otomatisasi format Rupiah (Menambahkan Titik)
+    function formatRupiah(angka) {
+        let number_string = angka.toString().replace(/[^0-9]/g, '');
+        let sisa = number_string.length % 3;
+        let rupiah = number_string.substr(0, sisa);
+        let ribuan = number_string.substr(sisa).match(/\d{3}/g);
+
+        if (ribuan) {
+            let separator = sisa ? '.' : '';
+            rupiah += separator + ribuan.join('.');
+        }
+        return rupiah;
     }
+
+    // Event ketika user mengetik nominal manual
+    inputVisible.addEventListener('input', function(e) {
+        let rawValue = this.value.replace(/[^0-9]/g, ''); // Ambil angka aslinya saja
+        this.value = formatRupiah(rawValue);              // Tampilkan dengan format titik
+        inputReal.value = rawValue;                       // Simpan angka murni di hidden input
+    });
+
+    // Fungsi ketika user menekan tombol nominal cepat (100k, 200k, dst)
+    function setNominal(angka) {
+        inputReal.value = angka;
+        inputVisible.value = formatRupiah(angka);
+    }
+
+    // Validasi Form sebelum dikirim menggunakan JavaScript
+    formTopup.addEventListener('submit', function(e) {
+        let nominal = parseInt(inputReal.value);
+        if (!nominal || nominal < 10000) {
+            e.preventDefault(); // Batalkan pengiriman
+            Swal.fire({
+                icon: 'warning',
+                title: 'Nominal Kurang!',
+                text: 'Minimal top up adalah Rp 10.000',
+                confirmButtonColor: '#1a365d'
+            });
+        } else if (nominal > 5000000) {
+            e.preventDefault(); // Batalkan pengiriman
+            Swal.fire({
+                icon: 'warning',
+                title: 'Nominal Berlebihan!',
+                text: 'Maksimal top up adalah Rp 5.000.000',
+                confirmButtonColor: '#1a365d'
+            });
+        }
+    });
 
     // Animasi SweetAlert Berdasarkan Response PHP
     <?php if($status_topup == 'success'): ?>
