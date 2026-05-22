@@ -12,6 +12,7 @@ $status_topup = '';
 $pesan_topup = '';
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    // PHP sekarang mengambil angka asli tanpa titik dari input tersembunyi
     $nominal = (int)$_POST['nominal'];
     
     // VALIDASI: Minimal 10rb, Maksimal 5 Juta
@@ -94,10 +95,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                         <div class="input-group">
                             <span class="input-group-text bg-white fw-bold border-end-0" style="border-radius: 12px 0 0 12px;">Rp</span>
                             
-                            <input type="hidden" name="nominal" id="inputNominalReal">
+                            <input type="hidden" id="nominal_asli" name="nominal" required>
                             
-                            <input type="text" id="inputNominalVisible" class="form-control border-start-0 fw-bold fs-5" 
-                                   placeholder="0" required style="border-radius: 0 12px 12px 0;" autocomplete="off">
+                            <input type="text" id="inputNominal" class="form-control border-start-0 fw-bold fs-5" 
+                                   placeholder="0" required style="border-radius: 0 12px 12px 0;" 
+                                   oninput="formatRupiahManual(this)" autocomplete="off">
+                                   
                         </div>
                         <div class="form-text text-danger mt-1 ms-1 fw-bold">* Minimal top up Rp 10.000</div>
                     </div>
@@ -111,57 +114,18 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     </div>
 </div>
 
+<script src="script.js"></script>
+
 <script>
-    const inputVisible = document.getElementById('inputNominalVisible');
-    const inputReal = document.getElementById('inputNominalReal');
-    const formTopup = document.getElementById('formTopup');
-
-    // Fungsi otomatisasi format Rupiah (Menambahkan Titik)
-    function formatRupiah(angka) {
-        let number_string = angka.toString().replace(/[^0-9]/g, '');
-        let sisa = number_string.length % 3;
-        let rupiah = number_string.substr(0, sisa);
-        let ribuan = number_string.substr(sisa).match(/\d{3}/g);
-
-        if (ribuan) {
-            let separator = sisa ? '.' : '';
-            rupiah += separator + ribuan.join('.');
-        }
-        return rupiah;
-    }
-
-    // Event ketika user mengetik nominal manual
-    inputVisible.addEventListener('input', function(e) {
-        let rawValue = this.value.replace(/[^0-9]/g, ''); // Ambil angka aslinya saja
-        this.value = formatRupiah(rawValue);              // Tampilkan dengan format titik
-        inputReal.value = rawValue;                       // Simpan angka murni di hidden input
-    });
-
-    // Fungsi ketika user menekan tombol nominal cepat (100k, 200k, dst)
-    function setNominal(angka) {
-        inputReal.value = angka;
-        inputVisible.value = formatRupiah(angka);
-    }
-
-    // Validasi Form sebelum dikirim menggunakan JavaScript
-    formTopup.addEventListener('submit', function(e) {
-        let nominal = parseInt(inputReal.value);
+    // Mencegah user mengirim form kosong atau kurang dari 10.000
+    document.getElementById('formTopup').addEventListener('submit', function(e) {
+        let nominal = parseInt(document.getElementById('nominal_asli').value);
         if (!nominal || nominal < 10000) {
-            e.preventDefault(); // Batalkan pengiriman
-            Swal.fire({
-                icon: 'warning',
-                title: 'Nominal Kurang!',
-                text: 'Minimal top up adalah Rp 10.000',
-                confirmButtonColor: '#1a365d'
-            });
+            e.preventDefault();
+            Swal.fire({ icon: 'warning', title: 'Nominal Kurang!', text: 'Minimal top up adalah Rp 10.000', confirmButtonColor: '#1a365d' });
         } else if (nominal > 5000000) {
-            e.preventDefault(); // Batalkan pengiriman
-            Swal.fire({
-                icon: 'warning',
-                title: 'Nominal Berlebihan!',
-                text: 'Maksimal top up adalah Rp 5.000.000',
-                confirmButtonColor: '#1a365d'
-            });
+            e.preventDefault();
+            Swal.fire({ icon: 'warning', title: 'Nominal Berlebihan!', text: 'Maksimal top up adalah Rp 5.000.000', confirmButtonColor: '#1a365d' });
         }
     });
 
