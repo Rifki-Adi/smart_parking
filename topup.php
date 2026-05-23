@@ -12,7 +12,7 @@ $status_topup = '';
 $pesan_topup = '';
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-    // PHP sekarang mengambil angka asli tanpa titik dari input tersembunyi
+    // Menangkap angka murni yang dikirim oleh input tersembunyi
     $nominal = (int)$_POST['nominal'];
     
     // VALIDASI: Minimal 10rb, Maksimal 5 Juta
@@ -100,7 +100,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                             <input type="text" id="inputNominal" class="form-control border-start-0 fw-bold fs-5" 
                                    placeholder="0" required style="border-radius: 0 12px 12px 0;" 
                                    oninput="formatRupiahManual(this)" autocomplete="off">
-                                   
                         </div>
                         <div class="form-text text-danger mt-1 ms-1 fw-bold">* Minimal top up Rp 10.000</div>
                     </div>
@@ -114,10 +113,44 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     </div>
 </div>
 
-<script src="script.js"></script>
-
 <script>
-    // Mencegah user mengirim form kosong atau kurang dari 10.000
+    // FUNGSI JAVASCRIPT MANDIRI KHUSUS HALAMAN TOP UP
+    
+    // 1. Fungsi saat user mengetik manual di kolom input
+    function formatRupiahManual(inputElement) {
+        let angka_asli = inputElement.value.replace(/[^0-9]/g, ''); // Buang huruf/titik
+        
+        // Simpan ke input tersembunyi
+        document.getElementById('nominal_asli').value = angka_asli;
+
+        // Pasang titik
+        let sisa = angka_asli.length % 3;
+        let rupiah = angka_asli.substr(0, sisa);
+        let ribuan = angka_asli.substr(sisa).match(/\d{3}/g);
+
+        if (ribuan) {
+            let separator = sisa ? '.' : '';
+            rupiah += separator + ribuan.join('.');
+        }
+        
+        // Tampilkan ke layar
+        inputElement.value = rupiah;
+    }
+
+    // 2. Fungsi saat user klik tombol pilihan cepat (50k, 100k, dll)
+    function setNominal(angka) {
+        document.getElementById('nominal_asli').value = angka; // Simpan angka asli
+        
+        // Format ke dalam tampilan titik
+        let sisa = angka.toString().length % 3;
+        let rupiah = angka.toString().substr(0, sisa);
+        let ribuan = angka.toString().substr(sisa).match(/\d{3}/g);
+        if (ribuan) rupiah += (sisa ? '.' : '') + ribuan.join('.');
+        
+        document.getElementById('inputNominal').value = rupiah; // Tampilkan
+    }
+
+    // 3. Validasi saat tombol "KONFIRMASI PEMBAYARAN" diklik
     document.getElementById('formTopup').addEventListener('submit', function(e) {
         let nominal = parseInt(document.getElementById('nominal_asli').value);
         if (!nominal || nominal < 10000) {
@@ -129,7 +162,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         }
     });
 
-    // Animasi SweetAlert Berdasarkan Response PHP
+    // 4. Animasi Pop Up Sukses / Gagal dari PHP
     <?php if($status_topup == 'success'): ?>
         Swal.fire({
             icon: 'success',
