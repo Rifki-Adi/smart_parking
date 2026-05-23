@@ -12,7 +12,7 @@ $status_topup = '';
 $pesan_topup = '';
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-    // Menangkap angka murni yang dikirim oleh input tersembunyi
+    // Menangkap angka murni dan memaksa menjadikannya tipe Integer (Angka Murni)
     $nominal = (int)$_POST['nominal'];
     
     // VALIDASI: Minimal 10rb, Maksimal 5 Juta
@@ -25,10 +25,16 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     } else {
         try {
             $conn->beginTransaction();
-            // Tambah Saldo
-            $conn->prepare("UPDATE profiles SET saldo = saldo + ? WHERE id = ?")->execute([$nominal, $uid]);
-            // Catat Transaksi
-            $conn->prepare("INSERT INTO transaksi (user_id, tipe, jumlah, keterangan) VALUES (?, 'topup', ?, 'Top Up Saldo')")->execute([$uid, $nominal]);
+            
+            // PERBAIKAN: Angka $nominal kita masukkan langsung ke dalam query (tanpa ?) 
+            // agar PostgreSQL (Supabase) bisa membaca bahwa ini adalah angka murni, bukan teks.
+            
+            // 1. Tambah Saldo
+            $conn->prepare("UPDATE profiles SET saldo = saldo + $nominal WHERE id = ?")->execute([$uid]);
+            
+            // 2. Catat Transaksi
+            $conn->prepare("INSERT INTO transaksi (user_id, tipe, jumlah, keterangan) VALUES (?, 'topup', $nominal, 'Top Up Saldo')")->execute([$uid]);
+            
             $conn->commit();
             
             $status_topup = 'success';
@@ -36,7 +42,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         } catch (Exception $e) {
             $conn->rollBack();
             $status_topup = 'error';
-            $pesan_topup = 'Gagal memproses transaksi.';
+            // PERBAIKAN: Menampilkan pesan error asli dari database jika masih gagal
+            $pesan_topup = 'Database Error: ' . $e->getMessage();
         }
     }
 }
@@ -114,16 +121,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 </div>
 
 <script>
-    // FUNGSI JAVASCRIPT MANDIRI KHUSUS HALAMAN TOP UP
-    
     // 1. Fungsi saat user mengetik manual di kolom input
     function formatRupiahManual(inputElement) {
-        let angka_asli = inputElement.value.replace(/[^0-9]/g, ''); // Buang huruf/titik
+        let angka_asli = inputElement.value.replace(/[^0-9]/g, ''); 
         
-        // Simpan ke input tersembunyi
         document.getElementById('nominal_asli').value = angka_asli;
 
-        // Pasang titik
         let sisa = angka_asli.length % 3;
         let rupiah = angka_asli.substr(0, sisa);
         let ribuan = angka_asli.substr(sisa).match(/\d{3}/g);
@@ -133,24 +136,22 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             rupiah += separator + ribuan.join('.');
         }
         
-        // Tampilkan ke layar
         inputElement.value = rupiah;
     }
 
-    // 2. Fungsi saat user klik tombol pilihan cepat (50k, 100k, dll)
+    // 2. Fungsi saat user klik tombol pilihan cepat
     function setNominal(angka) {
-        document.getElementById('nominal_asli').value = angka; // Simpan angka asli
+        document.getElementById('nominal_asli').value = angka; 
         
-        // Format ke dalam tampilan titik
         let sisa = angka.toString().length % 3;
         let rupiah = angka.toString().substr(0, sisa);
         let ribuan = angka.toString().substr(sisa).match(/\d{3}/g);
         if (ribuan) rupiah += (sisa ? '.' : '') + ribuan.join('.');
         
-        document.getElementById('inputNominal').value = rupiah; // Tampilkan
+        document.getElementById('inputNominal').value = rupiah; 
     }
 
-    // 3. Validasi saat tombol "KONFIRMASI PEMBAYARAN" diklik
+    // 3. Validasi saat tombol submit diklik
     document.getElementById('formTopup').addEventListener('submit', function(e) {
         let nominal = parseInt(document.getElementById('nominal_asli').value);
         if (!nominal || nominal < 10000) {
@@ -162,7 +163,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         }
     });
 
-    // 4. Animasi Pop Up Sukses / Gagal dari PHP
+    // 4. Animasi Pop Up
     <?php if($status_topup == 'success'): ?>
         Swal.fire({
             icon: 'success',
