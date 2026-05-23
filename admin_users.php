@@ -24,12 +24,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
     $plat_edit = strtoupper(trim($_POST['plat_nomor']));
     $saldo_edit = (int)$_POST['saldo'];
     $nohp_edit = trim($_POST['no_hp']);
-    
+
     // LOGIKA BARU: Otomatis buat ulang Token Stiker berdasarkan Plat yang baru diedit
     $qr_permanen_edit = "STIKER-" . $plat_edit;
 
     try {
-        // PERUBAHAN: Tambahkan kolom qr_token_permanen di query SQL
         $stmt = $conn->prepare("UPDATE profiles SET nama = ?, plat_nomor = ?, no_hp = ?, saldo = ?, qr_token_permanen = ? WHERE id = ? AND role = 'user'");
         $stmt->execute([$nama_edit, $plat_edit, $nohp_edit, $saldo_edit, $qr_permanen_edit, $id_edit]);
         $_SESSION['success_msg'] = "Data pengguna dan token stiker berhasil diperbarui!";
@@ -100,7 +99,7 @@ $users = $stmt_users->fetchAll();
 <nav class="navbar navbar-expand-lg sticky-top mb-4 py-2">
     <div class="container">
         <a class="navbar-brand d-flex align-items-center" href="admin_dashboard.php">
-            <img src="Logo.png" alt="Smart Parking Logo" style="height: 80px; width: auto;" class="me-3">
+            <img src="logo 1.png" alt="Smart Parking Logo" style="height: 80px; width: auto;" class="me-3">
             <span class="badge bg-danger fs-6 shadow-sm"><i class="fas fa-user-shield me-1"></i> ADMIN: <?= htmlspecialchars($admin_name) ?></span>
         </a>
         <button class="navbar-toggler border-0" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
@@ -110,8 +109,6 @@ $users = $stmt_users->fetchAll();
             <ul class="navbar-nav ms-auto align-items-center">
                 <li class="nav-item"><a class="nav-link fw-bold" href="admin_dashboard.php"><i class="fas fa-desktop me-1"></i> Monitor</a></li>
                 <li class="nav-item"><a class="nav-link active fw-bold" style="color: var(--primary-color);" href="admin_users.php"><i class="fas fa-users me-1"></i> Pengguna</a></li>
-                <li class="nav-item"><a class="nav-link fw-bold" href="admin_scan.php"><i class="fas fa-qrcode me-1"></i> Verifikasi QR</a></li>
-                <li class="nav-item"><a class="nav-link" href="export_excel.php"><i class="fas fa-file-excel text-success me-1"></i> Excel</a></li>
                 <li class="nav-item ms-3"><a class="btn btn-outline-danger btn-sm rounded-pill px-4 fw-bold" href="logout.php">Keluar</a></li>
             </ul>
         </div>
