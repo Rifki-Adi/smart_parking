@@ -200,8 +200,33 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
         } catch (e) {}
     }
 
-    fetchUserLiveData(); fetchLiveSlots();
-    setInterval(fetchUserLiveData, 1000); setInterval(fetchLiveSlots, 2000); 
+    // --- FITUR 3 DETIK ANTI-LAG (SURVIVAL MODE) ---
+    let userLiveInterval;
+    let userSlotInterval;
+
+    function startDashboardPolling() {
+        fetchUserLiveData();
+        fetchLiveSlots();
+        userLiveInterval = setInterval(fetchUserLiveData, 3000);
+        userSlotInterval = setInterval(fetchLiveSlots, 3000);
+    }
+
+    function stopDashboardPolling() {
+        clearInterval(userLiveInterval);
+        clearInterval(userSlotInterval);
+    }
+
+    // Jalankan pertama kali
+    startDashboardPolling();
+
+    // Berhenti meminta data ke Azure jika User pindah tab / minimize browser
+    document.addEventListener("visibilitychange", () => {
+        if (document.hidden) {
+            stopDashboardPolling();
+        } else {
+            startDashboardPolling();
+        }
+    });
 
     async function bookingSlot(nomor) {
         const result = await Swal.fire({
@@ -245,9 +270,12 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
     function bukaModalRiwayat() {
         document.getElementById('trx_table_body').innerHTML = '<tr><td colspan="4" class="text-center py-4"><div class="spinner-border text-primary" role="status"></div><br>Memuat data riwayat live...</td></tr>';
         resetFilterModal(false); new bootstrap.Modal(document.getElementById('modalTrx')).show(); fetchAndRenderLive();
-        if(liveTrxInterval) clearInterval(liveTrxInterval); liveTrxInterval = setInterval(fetchAndRenderLive, 2000);
+        
+        // Modal diubah ke 3000ms untuk Anti-Lag
+        if(liveTrxInterval) clearInterval(liveTrxInterval); liveTrxInterval = setInterval(fetchAndRenderLive, 3000);
     }
     document.getElementById('modalTrx').addEventListener('hidden.bs.modal', function () { clearInterval(liveTrxInterval); });
+    
     async function fetchAndRenderLive() { try { const response = await fetch(`api.php?action=get_user_trx&user_id=${USER_ID}&_=${Date.now()}`); globalTrxData = await response.json(); renderTrxTable(); } catch (e) {} }
     function setSortTrx(colName) { if (sortModalCol === colName) { sortModalDir = sortModalDir === 'asc' ? 'desc' : 'asc'; } else { sortModalCol = colName; sortModalDir = 'asc'; } updateSortIconsTrx(); renderTrxTable(); }
     function updateSortIconsTrx() { const cols = ['created_at', 'tipe', 'jumlah', 'keterangan']; cols.forEach(c => { let icon = document.getElementById('icon-sort-modal-' + c); icon.className = 'icon-sort'; if (c === sortModalCol) { icon.classList.add('fas'); icon.classList.add(sortModalDir === 'asc' ? 'fa-sort-up' : 'fa-sort-down'); icon.classList.add('active'); } else { icon.classList.add('fas', 'fa-sort'); } }); }
