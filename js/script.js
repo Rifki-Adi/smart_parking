@@ -33,9 +33,29 @@ async function fetchLiveSlots() {
     }
 }
 
+// --- FITUR 3 DETIK ANTI-LAG (SURVIVAL MODE) ---
+let liveSlotInterval;
+
+function startUserPolling() {
+    fetchLiveSlots();
+    liveSlotInterval = setInterval(fetchLiveSlots, 3000); // Set ke 3 Detik
+}
+
+function stopUserPolling() {
+    clearInterval(liveSlotInterval);
+}
+
 if (document.getElementById('slot-area-container')) { 
-    fetchLiveSlots(); 
-    setInterval(fetchLiveSlots, 2500); 
+    startUserPolling();
+    
+    // Berhenti merepotkan server Azure jika tab browser sedang ditutup/minimize
+    document.addEventListener("visibilitychange", () => {
+        if (document.hidden) {
+            stopUserPolling();
+        } else {
+            startUserPolling();
+        }
+    });
 }
 
 // --- Animasi Pesan & Cek Limit ---
