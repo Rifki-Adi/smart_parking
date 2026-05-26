@@ -157,14 +157,12 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
             document.getElementById('slot-area-container').innerHTML = htmlContainer;
         } catch (e) {}
     }
-    fetchLiveAdminSlots(); setInterval(fetchLiveAdminSlots, 1000);
 
     let currentPage = 1; let currentSortCol = 'created_at'; let currentSortDir = 'desc';
     function setSortCol(colName) { if (currentSortCol === colName) { currentSortDir = (currentSortDir === 'asc') ? 'desc' : 'asc'; } else { currentSortCol = colName; currentSortDir = 'asc'; } updateSortIcons(); resetPageAndFetch(); }
     function updateSortIcons() { const cols = ['created_at', 'nama', 'tipe', 'jumlah']; cols.forEach(c => { let icon = document.getElementById('icon-sort-' + c); icon.className = 'icon-sort'; if (c === currentSortCol) { icon.classList.add('fas'); icon.classList.add(currentSortDir === 'asc' ? 'fa-sort-up' : 'fa-sort-down'); icon.classList.add('active'); } else { icon.classList.add('fas', 'fa-sort'); } }); }
     function resetPageAndFetch() { currentPage = 1; fetchDashboardData(); }
     
-    // PERUBAHAN: Fungsi clear filter untuk 2 tanggal
     function clearFilters() { 
         document.getElementById('filter_tipe').value = ''; 
         document.getElementById('filter_tgl_mulai').value = ''; 
@@ -182,7 +180,6 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
         let fTglMulai = document.getElementById('filter_tgl_mulai').value;
         let fTglSelesai = document.getElementById('filter_tgl_selesai').value;
         try {
-            // PERUBAHAN: URL API SEKARANG MEMBAWA tgl_mulai DAN tgl_selesai
             const res = await fetch(`api.php?action=get_dashboard_data&p=${currentPage}&tipe=${fTipe}&tgl_mulai=${fTglMulai}&tgl_selesai=${fTglSelesai}&sort_col=${currentSortCol}&sort_dir=${currentSortDir}&_=${Date.now()}`);
             const data = await res.json();
             document.getElementById('total_user_card').innerText = data.total_user; document.getElementById('total_saldo_card').innerText = 'Rp ' + data.total_saldo.toLocaleString('id-ID');
@@ -219,7 +216,35 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
             } else { pagContainer.innerHTML = ''; }
         } catch (e) {}
     }
-    fetchDashboardData(); setInterval(fetchDashboardData, 2000);
+
+    // --- FITUR 3 DETIK ANTI-LAG (SURVIVAL MODE) ---
+    let intervalAdminSlots;
+    let intervalDashboard;
+
+    function startAdminPolling() {
+        fetchLiveAdminSlots();
+        fetchDashboardData();
+        // Meminta data setiap 3 detik (3000ms) untuk mengamankan server Azure
+        intervalAdminSlots = setInterval(fetchLiveAdminSlots, 3000);
+        intervalDashboard = setInterval(fetchDashboardData, 3000);
+    }
+
+    function stopAdminPolling() {
+        clearInterval(intervalAdminSlots);
+        clearInterval(intervalDashboard);
+    }
+
+    // Jalankan sistem polling saat web pertama kali terbuka
+    startAdminPolling();
+
+    // Hentikan polling otomatis jika Admin berpindah tab agar server bisa beristirahat
+    document.addEventListener("visibilitychange", () => {
+        if (document.hidden) {
+            stopAdminPolling();
+        } else {
+            startAdminPolling();
+        }
+    });
 </script>
 </body>
 </html>
