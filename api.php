@@ -59,20 +59,7 @@ if ($action == 'book_slot') {
 }
 
 // 2. ACTION: GET SLOTS (DASHBOARD USER)
-if ($action == 'get_slots') {
-    try {
-        $pending_res = $conn->query("SELECT id, user_id, kode_booking, created_at FROM reservasi WHERE status = 'pending'")->fetchAll(PDO::FETCH_ASSOC);
-        $current_time = strtotime(date('Y-m-d H:i:s'));
-        foreach($pending_res as $exp) {
-            if (!empty($exp['created_at'])) {
-                $clean_date = substr($exp['created_at'], 0, 19);
-                if (($current_time - strtotime($clean_date)) > 60) {
-                    $conn->query("DELETE FROM reservasi WHERE id = " . $exp['id']);
-                    $conn->prepare("INSERT INTO transaksi (user_id, tipe, jumlah, keterangan) VALUES (?, 'hangus', 0, ?)")->execute([$exp['user_id'], 'Waktu Habis Tiket ' . $exp['kode_booking']]);
-                }
-            }
-        }
-    } catch (Exception $e) {}
+catch (Exception $e) {}
 
     $uid = isset($_GET['uid']) ? $_GET['uid'] : '';
     $slots = $conn->query("SELECT * FROM slot ORDER BY slot_nomor ASC LIMIT 4")->fetchAll(PDO::FETCH_ASSOC);
