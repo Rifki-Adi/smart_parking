@@ -38,7 +38,7 @@ let liveSlotInterval;
 
 function startUserPolling() {
     fetchLiveSlots();
-    liveSlotInterval = setInterval(fetchLiveSlots, 3000); // Set ke 3 Detik
+    liveSlotInterval = setInterval(fetchLiveSlots, 10000); // Set ke 3 Detik
 }
 
 function stopUserPolling() {
