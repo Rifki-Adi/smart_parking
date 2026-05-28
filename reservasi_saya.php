@@ -35,7 +35,7 @@ $uid = $_SESSION['user_id'];
         <div class="collapse navbar-collapse" id="navbarNav">
             <ul class="navbar-nav ms-auto align-items-center">
                 <li class="nav-item"><a class="nav-link fw-bold" href="dashboard.php">Beranda</a></li>
-                <li class="nav-item"><a class="nav-link active fw-bold" style="color: var(--primary-color);" href="reservasi_saya.php">Tiket Saya</a></li>
+                <li class="nav-item"><a class="nav-link active fw-bold" style="color: var(--primary-color);" href="reservasi_saya.php">QR Saya</a></li>
                 <li class="nav-item"><a class="nav-link text-danger fw-bold" href="logout.php">Keluar</a></li>
             </ul>
         </div>
