@@ -70,7 +70,7 @@ if ($action == 'get_slots') {
     $data = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     echo json_encode($data);
-} 
+} catch (Exception $e) {}
 
     $uid = isset($_GET['uid']) ? $_GET['uid'] : '';
     $slots = $conn->query("SELECT * FROM slot ORDER BY slot_nomor ASC LIMIT 4")->fetchAll(PDO::FETCH_ASSOC);
