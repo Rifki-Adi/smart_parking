@@ -59,7 +59,18 @@ if ($action == 'book_slot') {
 }
 
 // 2. ACTION: GET SLOTS (DASHBOARD USER)
-catch (Exception $e) {}
+if ($action == 'get_slots') {
+
+    $stmt = $conn->query("
+    SELECT id, slot_nomor, status
+    FROM slot
+    ORDER BY slot_nomor
+    ");
+
+    $data = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    echo json_encode($data);
+} catch (Exception $e) {}
 
     $uid = isset($_GET['uid']) ? $_GET['uid'] : '';
     $slots = $conn->query("SELECT * FROM slot ORDER BY slot_nomor ASC LIMIT 4")->fetchAll(PDO::FETCH_ASSOC);
