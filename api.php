@@ -61,50 +61,88 @@ if ($action == 'book_slot') {
 // 2. ACTION: GET SLOTS (DASHBOARD USER)
 if ($action == 'get_slots') {
 
-    $stmt = $conn->query("
-    SELECT id, slot_nomor, terisi
-    FROM slot
-    ORDER BY slot_nomor ASC
-    ");
-
-    $data = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-    echo json_encode($data);
-} catch (Exception $e) {}
+    ob_clean();
 
     $uid = isset($_GET['uid']) ? $_GET['uid'] : '';
-    $slots = $conn->query("SELECT * FROM slot ORDER BY slot_nomor ASC LIMIT 4")->fetchAll(PDO::FETCH_ASSOC);
-    $res_aktif = $conn->query("SELECT slot_id, user_id, status, kode_booking FROM reservasi WHERE status IN ('pending', 'check-in')")->fetchAll(PDO::FETCH_ASSOC);
-    $map = []; foreach($res_aktif as $r) { $map[$r['slot_id']] = ['uid' => $r['user_id'], 'status' => $r['status'], 'kode' => $r['kode_booking']]; }
-    
+
+    $slots = $conn->query("
+    SELECT *
+    FROM slot
+    ORDER BY slot_nomor ASC
+    LIMIT 4
+    ")->fetchAll(PDO::FETCH_ASSOC);
+
+    $res_aktif = $conn->query("
+    SELECT slot_id, user_id, status, kode_booking
+    FROM reservasi
+    WHERE status IN ('pending', 'check-in')
+    ")->fetchAll(PDO::FETCH_ASSOC);
+
+    $map = [];
+
+    foreach($res_aktif as $r) {
+        $map[$r['slot_id']] = [
+            'uid' => $r['user_id'],
+            'status' => $r['status'],
+            'kode' => $r['kode_booking']
+        ];
+    }
+
     $result = [];
+
     foreach($slots as $s) {
+
         $state = 'kosong';
-        
+
         if ($s['terisi'] === true || $s['terisi'] === 't' || $s['terisi'] == 1) {
-            if (isset($map[$s['id']]) && $map[$s['id']]['uid'] == $uid && $map[$s['id']]['status'] == 'check-in') {
+
+            if (
+                isset($map[$s['id']]) &&
+                $map[$s['id']]['uid'] == $uid &&
+                $map[$s['id']]['status'] == 'check-in'
+            ) {
+
                 $state = 'terisi_me';
+
             } else {
+
                 $state = 'terisi';
             }
+
         } elseif (isset($map[$s['id']])) {
+
             $is_me = ($map[$s['id']]['uid'] == $uid);
+
             $r_status = $map[$s['id']]['status'];
+
             $r_kode = $map[$s['id']]['kode'];
-            
+
             if ($r_status == 'pending') {
+
                 $state = $is_me ? 'reserved_me' : 'reserved_other';
+
             } else {
+
                 if (strpos($r_kode, 'PL-') === 0) {
+
                     $state = 'kosong';
+
                 } else {
+
                     $state = $is_me ? 'reserved_me' : 'reserved_other';
                 }
             }
         }
-        $result[] = ['slot_nomor' => $s['slot_nomor'], 'state' => $state];
+
+        $result[] = [
+            'slot_nomor' => $s['slot_nomor'],
+            'state' => $state
+        ];
     }
-    echo json_encode($result); exit;
+
+    echo json_encode($result);
+
+    exit;
 }
 
 // 3. ACTION: CANCEL MANUAL
