@@ -62,9 +62,9 @@ if ($action == 'book_slot') {
 if ($action == 'get_slots') {
 
     $stmt = $conn->query("
-    SELECT id, slot_nomor, status
+    SELECT id, slot_nomor, terisi
     FROM slot
-    ORDER BY slot_nomor
+    ORDER BY slot_nomor ASC
     ");
 
     $data = $stmt->fetchAll(PDO::FETCH_ASSOC);
