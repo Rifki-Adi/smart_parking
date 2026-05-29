@@ -155,19 +155,56 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
 <script>
     const USER_ID = "<?= $uid ?>";
 
+    let userLiveInterval = null;
+    let userSlotInterval = null;
+    let userTimerInterval = null;
+    let userTimeLeft = 0;
+
+    function formatCountdown(seconds) {
+        seconds = Math.max(0, parseInt(seconds || 0));
+        const m = Math.floor(seconds / 60);
+        const s = seconds % 60;
+        return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+    }
+
+    function updateUserCountdownDisplay() {
+        const badge = document.getElementById('countdown-badge');
+        const timerText = document.getElementById('timer-text');
+
+        if (!badge || !timerText) return;
+
+        if (userTimeLeft > 0) {
+            badge.style.display = 'inline-block';
+            timerText.innerText = formatCountdown(userTimeLeft);
+        } else {
+            badge.style.display = 'none';
+            timerText.innerText = '00:00';
+        }
+    }
+
+    function startUserLocalTimer() {
+        if (userTimerInterval) return;
+
+        userTimerInterval = setInterval(() => {
+            if (userTimeLeft > 0) {
+                userTimeLeft--;
+            }
+            updateUserCountdownDisplay();
+        }, 1000);
+    }
+
     async function fetchUserLiveData() {
         try {
             let res = await fetch(`api.php?action=get_user_live_data&uid=${USER_ID}&_=${Date.now()}`);
             let data = await res.json();
+
             let elSaldo = document.getElementById('teks-saldo');
-            if(elSaldo) elSaldo.innerText = 'Rp ' + data.saldo.toLocaleString('id-ID');
-            let badge = document.getElementById('countdown-badge');
-            let timerText = document.getElementById('timer-text');
-            if (data.has_pending && data.time_left > 0) {
-                badge.style.display = 'inline-block';
-                let m = Math.floor(data.time_left / 60); let s = data.time_left % 60;
-                timerText.innerText = "0" + m + ":" + (s < 10 ? "0"+s : s);
-            } else { badge.style.display = 'none'; }
+            if(elSaldo) {
+                elSaldo.innerText = 'Rp ' + data.saldo.toLocaleString('id-ID');
+            }
+
+            userTimeLeft = parseInt(data.time_left || 0);
+            updateUserCountdownDisplay();
         } catch (e) {}
     }
 
@@ -177,49 +214,56 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
             const slots = await response.json();
             
             let htmlContainer = '';
+
             slots.forEach(slot => {
                 let cls = 'slot-free';
                 let btn_html = `<button type="button" onclick="bookingSlot('${slot.slot_nomor}')" class="btn btn-success btn-sm w-100 rounded-pill mt-2 fw-bold shadow-sm">RESERVASI</button>`;
                 
                 if (slot.state === 'terisi') {
-                    cls = 'slot-occupied'; btn_html = `<div class="badge bg-danger w-100 py-2 mt-2 rounded-pill shadow-sm">TERISI</div>`;
+                    cls = 'slot-occupied';
+                    btn_html = `<div class="badge bg-danger w-100 py-2 mt-2 rounded-pill shadow-sm">TERISI</div>`;
                 } 
                 else if (slot.state === 'terisi_me') {
                     cls = 'slot-occupied border-danger'; 
                     btn_html = `<div class="badge bg-danger w-100 py-2 mt-2 rounded-pill border border-dark shadow-sm">MOBIL ANDA</div>`;
                 } 
                 else if (slot.state === 'reserved_me') {
-                    cls = 'slot-reserved-me'; btn_html = `<div class="badge bg-warning text-dark w-100 py-2 mt-2 rounded-pill border border-dark shadow-sm">RESERVED (ANDA)</div>`;
-                } else if (slot.state === 'reserved_other') {
-                    cls = 'slot-reserved'; btn_html = `<div class="badge bg-secondary w-100 py-2 mt-2 rounded-pill shadow-sm">RESERVED</div>`;
+                    cls = 'slot-reserved-me';
+                    btn_html = `<div class="badge bg-warning text-dark w-100 py-2 mt-2 rounded-pill border border-dark shadow-sm">RESERVED (ANDA)</div>`;
+                }
+                else if (slot.state === 'reserved_other') {
+                    cls = 'slot-reserved';
+                    btn_html = `<div class="badge bg-secondary w-100 py-2 mt-2 rounded-pill shadow-sm">RESERVED</div>`;
                 } 
                 
                 htmlContainer += `<div class="col"><div id="slot-box-${slot.slot_nomor}" class="slot-card p-3 border rounded-4 text-center ${cls}"><i class="fas fa-car fa-2x mb-2"></i><h6 class="fw-bold mb-0">Slot ${slot.slot_nomor}</h6><div id="slot-btn-${slot.slot_nomor}">${btn_html}</div></div></div>`;
             });
+
             document.getElementById('slot-area-container').innerHTML = htmlContainer;
         } catch (e) {}
     }
 
-    // --- FITUR 3 DETIK ANTI-LAG (SURVIVAL MODE) ---
-    let userLiveInterval;
-    let userSlotInterval;
-
     function startDashboardPolling() {
+        stopDashboardPolling();
+
         fetchUserLiveData();
         fetchLiveSlots();
+        startUserLocalTimer();
+
         userLiveInterval = setInterval(fetchUserLiveData, 10000);
         userSlotInterval = setInterval(fetchLiveSlots, 10000);
     }
 
     function stopDashboardPolling() {
-        clearInterval(userLiveInterval);
-        clearInterval(userSlotInterval);
+        if (userLiveInterval) clearInterval(userLiveInterval);
+        if (userSlotInterval) clearInterval(userSlotInterval);
+
+        userLiveInterval = null;
+        userSlotInterval = null;
     }
 
-    // Jalankan pertama kali
     startDashboardPolling();
 
-    // Berhenti meminta data ke Azure jika User pindah tab / minimize browser
     document.addEventListener("visibilitychange", () => {
         if (document.hidden) {
             stopDashboardPolling();
@@ -232,18 +276,43 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
         const result = await Swal.fire({
             title: `Reservasi Slot ${nomor}?`,
             html: `Biaya reservasi <b>Rp 5.000</b>.<br><small class="text-danger fw-bold mt-2 d-block"><i class="fas fa-exclamation-circle me-1"></i> Reservasi hangus otomatis dlm 1 menit.</small>`,
-            icon: 'question', showCancelButton: true, confirmButtonColor: '#1a365d', cancelButtonColor: '#e74c3c', confirmButtonText: 'Ya, Reservasi!', cancelButtonText: 'Batal', reverseButtons: true
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonColor: '#1a365d',
+            cancelButtonColor: '#e74c3c',
+            confirmButtonText: 'Ya, Reservasi!',
+            cancelButtonText: 'Batal',
+            reverseButtons: true
         });
+
         if (!result.isConfirmed) return;
+
         Swal.fire({ title: 'Memproses...', allowOutsideClick: false, didOpen: () => { Swal.showLoading() } });
-        let fd = new FormData(); fd.append('user_id', USER_ID); fd.append('slot_nomor', nomor);
+
+        let fd = new FormData();
+        fd.append('user_id', USER_ID);
+        fd.append('slot_nomor', nomor);
+
         try {
             let res = await fetch('api.php?action=book_slot', { method: 'POST', body: fd });
             let data = await res.json();
+
             if(data.status === 'success') {
-                Swal.fire({title: 'Berhasil!', text: `Reservasi berhasil diamankan.`, icon: 'success', confirmButtonColor: '#559da0'}).then(() => { fetchUserLiveData(); fetchLiveSlots(); });
-            } else { Swal.fire('Gagal!', data.message, 'error'); }
-        } catch (e) { Swal.fire('Error!', 'Koneksi bermasalah.', 'error'); }
+                await Swal.fire({
+                    title: 'Berhasil!',
+                    text: `Reservasi berhasil diamankan.`,
+                    icon: 'success',
+                    confirmButtonColor: '#559da0'
+                });
+
+                fetchUserLiveData();
+                fetchLiveSlots();
+            } else {
+                Swal.fire('Gagal!', data.message, 'error');
+            }
+        } catch (e) {
+            Swal.fire('Error!', 'Koneksi bermasalah.', 'error');
+        }
     }
 
     function showQRPermanen(token) {
@@ -251,50 +320,168 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
         Swal.fire({
             title: 'QR Stiker Kendaraan',
             html: `<div class="mb-3 text-center"><img src="${url}" width="200" height="200" class="rounded shadow-sm border p-2"></div><p class="text-muted small mb-1">Kode Verifikasi (Bisa di-copy):</p><div class="input-group justify-content-center px-4"><input type="text" id="qr-copy-text" class="form-control text-center fw-bold bg-light" value="${token}" readonly><button class="btn btn-outline-secondary" onclick="copyToClipboard('qr-copy-text')" type="button"><i class="fas fa-copy"></i></button></div>`,
-            showCancelButton: true, confirmButtonColor: '#559da0', cancelButtonColor: '#1a365d', confirmButtonText: '<i class="fas fa-download"></i> Unduh', cancelButtonText: 'Tutup'
-        }).then((result) => { if (result.isConfirmed) downloadQR(token, 'Permanen'); });
+            showCancelButton: true,
+            confirmButtonColor: '#559da0',
+            cancelButtonColor: '#1a365d',
+            confirmButtonText: '<i class="fas fa-download"></i> Unduh',
+            cancelButtonText: 'Tutup'
+        }).then((result) => {
+            if (result.isConfirmed) downloadQR(token, 'Permanen');
+        });
     }
 
     function copyToClipboard(elementId) {
-        var copyText = document.getElementById(elementId); copyText.select(); copyText.setSelectionRange(0, 99999); 
-        navigator.clipboard.writeText(copyText.value).then(() => { Swal.fire({title: 'Tersalin!', text: copyText.value, icon: 'success', confirmButtonColor: '#559da0'}); });
+        var copyText = document.getElementById(elementId);
+        copyText.select();
+        copyText.setSelectionRange(0, 99999); 
+        navigator.clipboard.writeText(copyText.value).then(() => {
+            Swal.fire({title: 'Tersalin!', text: copyText.value, icon: 'success', confirmButtonColor: '#559da0'});
+        });
     }
 
     async function downloadQR(kode, tipe) {
         const url = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${kode}`;
-        try { const resp = await fetch(url); const blob = await resp.blob(); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `QR_${tipe}_${kode}.png`; a.click(); } catch (e) {}
+        try {
+            const resp = await fetch(url);
+            const blob = await resp.blob();
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `QR_${tipe}_${kode}.png`;
+            a.click();
+        } catch (e) {}
     }
 
-    let globalTrxData = []; let liveTrxInterval = null; let sortModalCol = 'created_at'; let sortModalDir = 'desc';
+    let globalTrxData = [];
+    let liveTrxInterval = null;
+    let sortModalCol = 'created_at';
+    let sortModalDir = 'desc';
 
     function bukaModalRiwayat() {
         document.getElementById('trx_table_body').innerHTML = '<tr><td colspan="4" class="text-center py-4"><div class="spinner-border text-primary" role="status"></div><br>Memuat data riwayat live...</td></tr>';
-        resetFilterModal(false); new bootstrap.Modal(document.getElementById('modalTrx')).show(); fetchAndRenderLive();
+        resetFilterModal(false);
+        new bootstrap.Modal(document.getElementById('modalTrx')).show();
+        fetchAndRenderLive();
         
-        // Modal diubah ke 3000ms untuk Anti-Lag
-        if(liveTrxInterval) clearInterval(liveTrxInterval); liveTrxInterval = setInterval(fetchAndRenderLive, 15000);
+        if(liveTrxInterval) clearInterval(liveTrxInterval);
+        liveTrxInterval = setInterval(fetchAndRenderLive, 15000);
     }
-    document.getElementById('modalTrx').addEventListener('hidden.bs.modal', function () { clearInterval(liveTrxInterval); });
+
+    document.getElementById('modalTrx').addEventListener('hidden.bs.modal', function () {
+        clearInterval(liveTrxInterval);
+    });
     
-    async function fetchAndRenderLive() { try { const response = await fetch(`api.php?action=get_user_trx&user_id=${USER_ID}&_=${Date.now()}`); globalTrxData = await response.json(); renderTrxTable(); } catch (e) {} }
-    function setSortTrx(colName) { if (sortModalCol === colName) { sortModalDir = sortModalDir === 'asc' ? 'desc' : 'asc'; } else { sortModalCol = colName; sortModalDir = 'asc'; } updateSortIconsTrx(); renderTrxTable(); }
-    function updateSortIconsTrx() { const cols = ['created_at', 'tipe', 'jumlah', 'keterangan']; cols.forEach(c => { let icon = document.getElementById('icon-sort-modal-' + c); icon.className = 'icon-sort'; if (c === sortModalCol) { icon.classList.add('fas'); icon.classList.add(sortModalDir === 'asc' ? 'fa-sort-up' : 'fa-sort-down'); icon.classList.add('active'); } else { icon.classList.add('fas', 'fa-sort'); } }); }
-    function resetFilterModal(doRender = true) { document.getElementById('filter_modal_tipe').value = 'all'; document.getElementById('filter_modal_tgl').value = ''; sortModalCol = 'created_at'; sortModalDir = 'desc'; updateSortIconsTrx(); if (doRender && globalTrxData.length > 0) renderTrxTable(); }
+    async function fetchAndRenderLive() {
+        try {
+            const response = await fetch(`api.php?action=get_user_trx&user_id=${USER_ID}&_=${Date.now()}`);
+            globalTrxData = await response.json();
+            renderTrxTable();
+        } catch (e) {}
+    }
+
+    function setSortTrx(colName) {
+        if (sortModalCol === colName) {
+            sortModalDir = sortModalDir === 'asc' ? 'desc' : 'asc';
+        } else {
+            sortModalCol = colName;
+            sortModalDir = 'asc';
+        }
+        updateSortIconsTrx();
+        renderTrxTable();
+    }
+
+    function updateSortIconsTrx() {
+        const cols = ['created_at', 'tipe', 'jumlah', 'keterangan'];
+        cols.forEach(c => {
+            let icon = document.getElementById('icon-sort-modal-' + c);
+            icon.className = 'icon-sort';
+            if (c === sortModalCol) {
+                icon.classList.add('fas');
+                icon.classList.add(sortModalDir === 'asc' ? 'fa-sort-up' : 'fa-sort-down');
+                icon.classList.add('active');
+            } else {
+                icon.classList.add('fas', 'fa-sort');
+            }
+        });
+    }
+
+    function resetFilterModal(doRender = true) {
+        document.getElementById('filter_modal_tipe').value = 'all';
+        document.getElementById('filter_modal_tgl').value = '';
+        sortModalCol = 'created_at';
+        sortModalDir = 'desc';
+        updateSortIconsTrx();
+        if (doRender && globalTrxData.length > 0) renderTrxTable();
+    }
+
     function renderTrxTable() {
-        let filterType = document.getElementById('filter_modal_tipe').value; let filterDate = document.getElementById('filter_modal_tgl').value; let dataToRender = [...globalTrxData]; 
-        if (filterDate !== '') { dataToRender = dataToRender.filter(t => t.created_at.substring(0, 10) === filterDate); }
-        if (filterType !== 'all') { dataToRender = dataToRender.filter(t => t.tipe === filterType); }
-        dataToRender.sort((a, b) => { let valA, valB; if (sortModalCol === 'created_at') { valA = new Date(a.created_at).getTime(); valB = new Date(b.created_at).getTime(); } else if (sortModalCol === 'jumlah') { valA = parseInt(a.jumlah); valB = parseInt(b.jumlah); } else { valA = (a[sortModalCol] || '').toString().toLowerCase(); valB = (b[sortModalCol] || '').toString().toLowerCase(); } if (valA < valB) return sortModalDir === 'asc' ? -1 : 1; if (valA > valB) return sortModalDir === 'asc' ? 1 : -1; return 0; });
+        let filterType = document.getElementById('filter_modal_tipe').value;
+        let filterDate = document.getElementById('filter_modal_tgl').value;
+        let dataToRender = [...globalTrxData];
+
+        if (filterDate !== '') {
+            dataToRender = dataToRender.filter(t => t.created_at.substring(0, 10) === filterDate);
+        }
+
+        if (filterType !== 'all') {
+            dataToRender = dataToRender.filter(t => t.tipe === filterType);
+        }
+
+        dataToRender.sort((a, b) => {
+            let valA, valB;
+
+            if (sortModalCol === 'created_at') {
+                valA = new Date(a.created_at).getTime();
+                valB = new Date(b.created_at).getTime();
+            } else if (sortModalCol === 'jumlah') {
+                valA = parseInt(a.jumlah);
+                valB = parseInt(b.jumlah);
+            } else {
+                valA = (a[sortModalCol] || '').toString().toLowerCase();
+                valB = (b[sortModalCol] || '').toString().toLowerCase();
+            }
+
+            if (valA < valB) return sortModalDir === 'asc' ? -1 : 1;
+            if (valA > valB) return sortModalDir === 'asc' ? 1 : -1;
+            return 0;
+        });
+
         let html = '';
-        if (dataToRender.length === 0) { html = '<tr><td colspan="4" class="text-center py-4 text-muted">Tidak ada transaksi pada filter ini.</td></tr>'; } else {
+
+        if (dataToRender.length === 0) {
+            html = '<tr><td colspan="4" class="text-center py-4 text-muted">Tidak ada transaksi pada filter ini.</td></tr>';
+        } else {
             dataToRender.forEach(t => {
-                let badge = 'bg-secondary'; let label = t.tipe.toUpperCase();
-                if(t.tipe === 'topup') { badge = 'bg-success'; label = 'Top Up'; } if(t.tipe === 'reservasi') { badge = 'bg-primary'; label = 'Reservasi'; } if(t.tipe === 'parkir') { badge = 'bg-info'; label = 'Check-In'; } if(t.tipe === 'checkout') { badge = 'bg-dark'; label = 'Check-Out'; } if(t.tipe === 'batal') { badge = 'bg-warning'; label = 'Batal Manual'; } if(t.tipe === 'hangus') { badge = 'bg-danger'; label = 'Hangus'; } if(t.tipe === 'penalty') { badge = 'bg-danger'; label = 'Hangus (Data Lama)'; }
-                let amount = parseInt(t.jumlah); let prefix = 'Rp '; let colorTxt = 'fw-bold';
-                if (t.tipe === 'topup' && amount > 0) { prefix = '+ Rp '; colorTxt = 'text-success fw-bold'; } else if (amount > 0) { prefix = '- Rp '; colorTxt = 'text-danger fw-bold'; } else { prefix = 'Rp '; colorTxt = 'text-muted fw-bold'; }
+                let badge = 'bg-secondary';
+                let label = t.tipe.toUpperCase();
+
+                if(t.tipe === 'topup') { badge = 'bg-success'; label = 'Top Up'; }
+                if(t.tipe === 'reservasi') { badge = 'bg-primary'; label = 'Reservasi'; }
+                if(t.tipe === 'parkir') { badge = 'bg-info'; label = 'Check-In'; }
+                if(t.tipe === 'checkout') { badge = 'bg-dark'; label = 'Check-Out'; }
+                if(t.tipe === 'batal') { badge = 'bg-warning'; label = 'Batal Manual'; }
+                if(t.tipe === 'hangus') { badge = 'bg-danger'; label = 'Hangus'; }
+                if(t.tipe === 'penalty') { badge = 'bg-danger'; label = 'Hangus (Data Lama)'; }
+
+                let amount = parseInt(t.jumlah);
+                let prefix = 'Rp ';
+                let colorTxt = 'fw-bold';
+
+                if (t.tipe === 'topup' && amount > 0) {
+                    prefix = '+ Rp ';
+                    colorTxt = 'text-success fw-bold';
+                } else if (amount > 0) {
+                    prefix = '- Rp ';
+                    colorTxt = 'text-danger fw-bold';
+                } else {
+                    prefix = 'Rp ';
+                    colorTxt = 'text-muted fw-bold';
+                }
+
                 html += `<tr><td class="ps-4"><span class="fw-bold d-block small">${t.hari_indo}, ${t.tgl_indo}</span><span class="text-muted small"><i class="fas fa-clock me-1"></i>${t.jam_indo} WIB</span></td><td><span class="badge ${badge} bg-opacity-10 text-${badge.replace('bg-','')} border border-${badge.replace('bg-','')}">${label}</span></td><td class="text-end ${colorTxt}">${prefix}${amount.toLocaleString('id-ID')}</td><td class="pe-4 small text-muted">${t.keterangan || '-'}</td></tr>`;
             });
-        } document.getElementById('trx_table_body').innerHTML = html;
+        }
+
+        document.getElementById('trx_table_body').innerHTML = html;
     }
 </script>
 </body>
