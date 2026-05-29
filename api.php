@@ -39,12 +39,15 @@ function cleanupExpiredReservations($conn) {
     }
 }
 
-// Jalankan cleanup otomatis setiap API dipanggil
-//$action = isset($_GET['action']) ? $_GET['action'] : '';
+// Ambil action lebih awal
+$action = isset($_GET['action']) ? $_GET['action'] : '';
+$expiredAt = date('Y-m-d H:i:s', time() - 60);
 
-//if (in_array($action, ['get_slots', 'get_slots_admin'])) {
-//    cleanupExpiredReservations($conn);
-//}
+// Jalankan cleanup hanya di action yang berkaitan dengan slot/tiket.
+// Jangan dijalankan di get_dashboard_data supaya dashboard admin tidak berat.
+if (in_array($action, ['book_slot', 'get_slots', 'get_slots_admin', 'get_user_live_data', 'gate_scan', 'cancel_booking'])) {
+    cleanupExpiredReservations($conn);
+}
 
 
 // =============================================
@@ -67,8 +70,6 @@ if (
     $_SESSION['user_id'] = 'esp32_device';
     $_SESSION['role']    = 'admin';
 }
-
-$action = isset($_GET['action']) ? $_GET['action'] : '';
 
 // 1. ACTION: RESERVASI SLOT
 if ($action == 'book_slot') {
@@ -123,12 +124,14 @@ if ($action == 'get_slots') {
     LIMIT 4
     ")->fetchAll(PDO::FETCH_ASSOC);
 
-    $res_aktif = $conn->query("
+    $stmt_res = $conn->prepare("
     SELECT slot_id, user_id, status, kode_booking
     FROM reservasi
     WHERE status = 'check-in'
-       OR (status = 'pending' AND created_at >= (NOW() - INTERVAL '60 seconds'))
-    ")->fetchAll(PDO::FETCH_ASSOC);
+       OR (status = 'pending' AND created_at >= ?)
+    ");
+    $stmt_res->execute([$expiredAt]);
+    $res_aktif = $stmt_res->fetchAll(PDO::FETCH_ASSOC);
 
     $map = [];
 
@@ -232,9 +235,15 @@ if ($action == 'get_slots_admin') {
     ob_clean();
     $slots = $conn->query("SELECT * FROM slot ORDER BY slot_nomor ASC LIMIT 4")->fetchAll(PDO::FETCH_ASSOC);
     
-    $res_info = $conn->query("SELECT r.slot_id, r.status, r.created_at, r.kode_booking, p.nama, p.plat_nomor FROM reservasi r JOIN profiles p ON r.user_id = p.id WHERE r.status = 'check-in' OR (r.status = 'pending' AND r.created_at >= (NOW() - INTERVAL '60 seconds'))")->fetchAll(PDO::FETCH_ASSOC);
+    $stmt_info = $conn->prepare("SELECT r.slot_id, r.status, r.created_at, r.kode_booking, p.nama, p.plat_nomor FROM reservasi r JOIN profiles p ON r.user_id = p.id WHERE r.status = 'check-in' OR (r.status = 'pending' AND r.created_at >= ?)");
+    $stmt_info->execute([$expiredAt]);
+    $res_info = $stmt_info->fetchAll(PDO::FETCH_ASSOC);
+
     $info_map = []; foreach($res_info as $ri) { $info_map[$ri['slot_id']] = $ri; }
-    $reservasi_aktif = $conn->query("SELECT slot_id FROM reservasi WHERE status = 'check-in' OR (status = 'pending' AND created_at >= (NOW() - INTERVAL '60 seconds'))")->fetchAll(PDO::FETCH_COLUMN);
+
+    $stmt_active = $conn->prepare("SELECT slot_id FROM reservasi WHERE status = 'check-in' OR (status = 'pending' AND created_at >= ?)");
+    $stmt_active->execute([$expiredAt]);
+    $reservasi_aktif = $stmt_active->fetchAll(PDO::FETCH_COLUMN);
     
     $kapasitas_terpakai = 0; $result = [];
     foreach($slots as $s) {
@@ -281,8 +290,8 @@ if ($action == 'gate_scan') {
     
     try {
         if (strpos($qr, 'PK-') === 0) {
-            $stmt = $conn->prepare("SELECT * FROM reservasi WHERE kode_booking = ? AND (status = 'check-in' OR (status = 'pending' AND created_at >= (NOW() - INTERVAL '60 seconds')))");
-            $stmt->execute([$qr]);
+            $stmt = $conn->prepare("SELECT * FROM reservasi WHERE kode_booking = ? AND (status = 'check-in' OR (status = 'pending' AND created_at >= ?))");
+            $stmt->execute([$qr, $expiredAt]);
             $booking = $stmt->fetch();
             
             if ($booking) {
@@ -378,14 +387,16 @@ if ($action == 'get_user_live_data') {
     ob_clean();
     $uid = isset($_GET['uid']) ? $_GET['uid'] : '';
     $saldo = $conn->query("SELECT saldo FROM profiles WHERE id = '$uid'")->fetchColumn();
-    $my_res = $conn->query("SELECT created_at FROM reservasi WHERE user_id = '$uid' AND status = 'pending' AND created_at >= (NOW() - INTERVAL '60 seconds')")->fetch(PDO::FETCH_ASSOC);
+    $stmt_my_res = $conn->prepare("SELECT created_at FROM reservasi WHERE user_id = ? AND status = 'pending' AND created_at >= ?");
+    $stmt_my_res->execute([$uid, $expiredAt]);
+    $my_res = $stmt_my_res->fetch(PDO::FETCH_ASSOC);
     $time_left = 0; $has_pending = false;
     if ($my_res && !empty($my_res['created_at'])) {
         $clean_date = substr($my_res['created_at'], 0, 19); $elapsed = time() - strtotime($clean_date); $time_left = 60 - $elapsed;
         if ($time_left < 0) $time_left = 0; $has_pending = true;
     }
-    $tiket_aktif = $conn->prepare("SELECT r.*, s.slot_nomor FROM reservasi r JOIN slot s ON r.slot_id = s.id WHERE r.user_id = ? AND (r.status = 'check-in' OR (r.status = 'pending' AND r.created_at >= (NOW() - INTERVAL '60 seconds'))) ORDER BY r.created_at DESC");
-    $tiket_aktif->execute([$uid]);
+    $tiket_aktif = $conn->prepare("SELECT r.*, s.slot_nomor FROM reservasi r JOIN slot s ON r.slot_id = s.id WHERE r.user_id = ? AND (r.status = 'check-in' OR (r.status = 'pending' AND r.created_at >= ?)) ORDER BY r.created_at DESC");
+    $tiket_aktif->execute([$uid, $expiredAt]);
     $tiket = $tiket_aktif->fetchAll(PDO::FETCH_ASSOC);
     foreach ($tiket as &$t) { $t['tgl_format'] = date('d M Y, H:i', strtotime($t['created_at'])) . ' WIB'; }
     echo json_encode(['saldo' => (int)$saldo, 'time_left' => $time_left, 'has_pending' => $has_pending, 'tiket' => $tiket]); exit;
