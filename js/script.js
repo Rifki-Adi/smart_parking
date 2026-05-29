@@ -1,4 +1,9 @@
 // --- Polling Realtime & Auto Refresh ---
+let liveSlotInterval = null;
+let userLiveInterval = null;
+let timerInterval = null;
+let liveTimeLeft = 0;
+
 async function fetchLiveSlots() {
     try {
         const uid = typeof USER_ID !== 'undefined' ? USER_ID : '';
@@ -9,46 +14,121 @@ async function fetchLiveSlots() {
             const slotElement = document.getElementById(`slot-box-${slot.slot_nomor}`);
             const btnArea = document.getElementById(`slot-btn-${slot.slot_nomor}`);
             
-            if (slotElement && btnArea) {
-                slotElement.classList.remove('slot-free', 'slot-reserved', 'slot-reserved-me', 'slot-occupied');
-                
-                // PERBAIKAN: Menambahkan tanda kutip '${slot.slot_nomor}' agar support nomor slot huruf (A1, A2)
-                if (slot.state === 'kosong') {
-                    slotElement.classList.add('slot-free');
-                    btnArea.innerHTML = `<button onclick="bookingSlot('${slot.slot_nomor}')" class="btn btn-success btn-sm w-100 rounded-pill mt-2 fw-bold shadow-sm">RESERVASI</button>`;
-                } else if (slot.state === 'reserved_me') {
-                    slotElement.classList.add('slot-reserved-me');
-                    btnArea.innerHTML = `<div class="badge bg-warning text-dark w-100 py-2 mt-2 rounded-pill border border-dark shadow-sm">RESERVED (ANDA)</div>`;
-                } else if (slot.state === 'reserved_other') {
-                    slotElement.classList.add('slot-reserved');
-                    btnArea.innerHTML = `<div class="badge bg-secondary w-100 py-2 mt-2 rounded-pill shadow-sm">RESERVED</div>`;
-                } else if (slot.state === 'terisi') {
-                    slotElement.classList.add('slot-occupied');
-                    btnArea.innerHTML = `<div class="badge bg-danger w-100 py-2 mt-2 rounded-pill shadow-sm">TERISI</div>`;
-                }
+            if (!slotElement || !btnArea) return;
+
+            slotElement.classList.remove(
+                'slot-free',
+                'slot-reserved',
+                'slot-reserved-me',
+                'slot-occupied'
+            );
+            
+            if (slot.state === 'kosong') {
+                slotElement.classList.add('slot-free');
+                btnArea.innerHTML = `
+                    <button onclick="bookingSlot('${slot.slot_nomor}')" 
+                    class="btn btn-success btn-sm w-100 rounded-pill mt-2 fw-bold shadow-sm">
+                    RESERVASI
+                    </button>`;
+            } 
+            else if (slot.state === 'reserved_me') {
+                slotElement.classList.add('slot-reserved-me');
+                btnArea.innerHTML = `
+                    <div class="badge bg-warning text-dark w-100 py-2 mt-2 rounded-pill border border-dark shadow-sm">
+                    RESERVED (ANDA)
+                    </div>`;
+            } 
+            else if (slot.state === 'reserved_other') {
+                slotElement.classList.add('slot-reserved');
+                btnArea.innerHTML = `
+                    <div class="badge bg-secondary w-100 py-2 mt-2 rounded-pill shadow-sm">
+                    RESERVED
+                    </div>`;
+            } 
+            else if (slot.state === 'terisi' || slot.state === 'terisi_me') {
+                slotElement.classList.add('slot-occupied');
+                btnArea.innerHTML = `
+                    <div class="badge bg-danger w-100 py-2 mt-2 rounded-pill shadow-sm">
+                    TERISI
+                    </div>`;
             }
         });
+
     } catch (e) {
-        console.log("Menunggu koneksi...");
+        console.log("Menunggu koneksi slot...");
     }
 }
 
-// --- FITUR 3 DETIK ANTI-LAG (SURVIVAL MODE) ---
-let liveSlotInterval;
+// --- Timer reservasi lokal 1 detik ---
+async function fetchUserLiveData() {
+    try {
+        const uid = typeof USER_ID !== 'undefined' ? USER_ID : '';
+        if (!uid) return;
+
+        const response = await fetch(`api.php?action=get_user_live_data&uid=${uid}`);
+        const data = await response.json();
+
+        liveTimeLeft = parseInt(data.time_left || 0);
+
+        updateTimerDisplay();
+
+    } catch (e) {
+        console.log("Menunggu koneksi live data...");
+    }
+}
+
+function updateTimerDisplay() {
+    const timerEls = document.querySelectorAll(
+        '#timer-reservasi, .timer-reservasi, [data-timer-reservasi]'
+    );
+
+    timerEls.forEach(timerEl => {
+        if (liveTimeLeft > 0) {
+            timerEl.innerText = liveTimeLeft + " detik";
+        } else {
+            timerEl.innerText = "Waktu habis";
+        }
+    });
+}
+
+function startLocalTimer() {
+    if (timerInterval) return;
+
+    timerInterval = setInterval(() => {
+        if (liveTimeLeft > 0) {
+            liveTimeLeft--;
+        }
+
+        updateTimerDisplay();
+    }, 1000);
+}
 
 function startUserPolling() {
+    stopUserPolling();
+
     fetchLiveSlots();
-    liveSlotInterval = setInterval(fetchLiveSlots, 10000); // Set ke 3 Detik
+    fetchUserLiveData();
+    startLocalTimer();
+
+    liveSlotInterval = setInterval(fetchLiveSlots, 10000);
+    userLiveInterval = setInterval(fetchUserLiveData, 10000);
 }
 
 function stopUserPolling() {
-    clearInterval(liveSlotInterval);
+    if (liveSlotInterval) {
+        clearInterval(liveSlotInterval);
+        liveSlotInterval = null;
+    }
+
+    if (userLiveInterval) {
+        clearInterval(userLiveInterval);
+        userLiveInterval = null;
+    }
 }
 
 if (document.getElementById('slot-area-container')) { 
     startUserPolling();
     
-    // Berhenti merepotkan server Azure jika tab browser sedang ditutup/minimize
     document.addEventListener("visibilitychange", () => {
         if (document.hidden) {
             stopUserPolling();
@@ -58,11 +138,15 @@ if (document.getElementById('slot-area-container')) {
     });
 }
 
-// --- Animasi Pesan & Cek Limit ---
+// --- Booking Slot ---
 async function bookingSlot(nomor) {
     const result = await Swal.fire({
         title: `Reservasi Slot ${nomor}?`,
-        html: `Biaya reservasi <b>Rp 5.000</b> akan dipotong.<br><small class="text-danger fw-bold mt-2 d-block"><i class="fas fa-exclamation-circle me-1"></i> Reservasi hangus otomatis jika tidak check-in dlm 3 menit.</small>`,
+        html: `Biaya reservasi <b>Rp 5.000</b> akan dipotong.<br>
+        <small class="text-danger fw-bold mt-2 d-block">
+        <i class="fas fa-exclamation-circle me-1"></i>
+        Reservasi hangus otomatis jika tidak check-in dalam 1 menit.
+        </small>`,
         icon: 'question',
         showCancelButton: true,
         confirmButtonColor: '#1a365d',
@@ -73,19 +157,29 @@ async function bookingSlot(nomor) {
     });
 
     if (!result.isConfirmed) return;
-    Swal.fire({ title: 'Memproses...', allowOutsideClick: false, didOpen: () => { Swal.showLoading() } });
+
+    Swal.fire({
+        title: 'Memproses...',
+        allowOutsideClick: false,
+        didOpen: () => Swal.showLoading()
+    });
 
     let fd = new FormData();
     fd.append('user_id', USER_ID);
     fd.append('slot_nomor', nomor);
 
     try {
-        let res = await fetch('api.php?action=book_slot', { method: 'POST', body: fd });
+        let res = await fetch('api.php?action=book_slot', {
+            method: 'POST',
+            body: fd
+        });
+
         let data = await res.json();
         
-        if(data.status === 'success') {
+        if (data.status === 'success') {
             Swal.close();
-            Swal.fire({
+
+            await Swal.fire({
                 title: 'Berhasil!',
                 text: `QR Reservasi: ${data.kode_booking}`,
                 imageUrl: data.qr_url,
@@ -93,21 +187,27 @@ async function bookingSlot(nomor) {
                 imageHeight: 200,
                 confirmButtonColor: '#559da0',
                 confirmButtonText: 'Lihat Reservasi'
-            }).then(() => {
-                window.location.href = "reservasi_saya.php";
             });
-            fetchLiveSlots(); 
+
+            window.location.href = "reservasi_saya.php";
         } else { 
             Swal.fire('Gagal!', data.message, 'error');
         }
-    } catch (e) { Swal.fire('Error!', 'Koneksi ke server bermasalah.', 'error'); }
+
+        fetchLiveSlots();
+        fetchUserLiveData();
+
+    } catch (e) {
+        Swal.fire('Error!', 'Koneksi ke server bermasalah.', 'error');
+    }
 }
 
-// --- Animasi Batal Reservasi ---
+// --- Batal Reservasi ---
 async function cancelBooking(kode) {
     const result = await Swal.fire({
         title: 'Batalkan Reservasi?',
-        html: `Menghapus reservasi <b>${kode}</b>.<br><small class="text-danger">Saldo Rp 5.000 tidak akan dikembalikan.</small>`,
+        html: `Menghapus reservasi <b>${kode}</b>.<br>
+        <small class="text-danger">Saldo Rp 5.000 tidak akan dikembalikan.</small>`,
         icon: 'warning',
         showCancelButton: true,
         confirmButtonColor: '#e74c3c',
@@ -118,28 +218,48 @@ async function cancelBooking(kode) {
     });
 
     if (!result.isConfirmed) return;
-    Swal.fire({ title: 'Menghapus...', allowOutsideClick: false, didOpen: () => { Swal.showLoading() } });
+
+    Swal.fire({
+        title: 'Menghapus...',
+        allowOutsideClick: false,
+        didOpen: () => Swal.showLoading()
+    });
 
     let fd = new FormData();
     fd.append('kode_booking', kode);
     fd.append('user_id', USER_ID);
 
     try {
-        let res = await fetch('api.php?action=cancel_booking', { method: 'POST', body: fd });
+        let res = await fetch('api.php?action=cancel_booking', {
+            method: 'POST',
+            body: fd
+        });
+
         let data = await res.json();
         
         if (data.status === 'success') {
-            await Swal.fire({ icon: 'success', title: 'Berhasil!', text: data.message, timer: 2000, showConfirmButton: false });
+            await Swal.fire({
+                icon: 'success',
+                title: 'Berhasil!',
+                text: data.message,
+                timer: 2000,
+                showConfirmButton: false
+            });
+
             location.reload(); 
         } else {
             Swal.fire('Gagal!', data.message, 'error');
         }
-    } catch (e) { Swal.fire('Error!', 'Gagal menghubungi server.', 'error'); }
+
+    } catch (e) {
+        Swal.fire('Error!', 'Gagal menghubungi server.', 'error');
+    }
 }
 
-// --- Fungsi Lihat QR Tiket Sekaligus Unduh ---
+// --- Lihat QR Tiket ---
 function lihatQR(kode) {
     const url = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${kode}`;
+
     Swal.fire({
         title: 'QR Reservasi',
         text: `Kode: ${kode}`,
@@ -158,9 +278,10 @@ function lihatQR(kode) {
     });
 }
 
-// --- Fungsi Lihat QR Permanen Sekaligus Unduh ---
+// --- QR Permanen ---
 function showQRPermanen(token) {
     const url = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${token}`;
+
     Swal.fire({
         title: 'QR Stiker Kendaraan',
         text: 'Akses Permanen Anda',
@@ -179,36 +300,42 @@ function showQRPermanen(token) {
     });
 }
 
-// --- Universal Download Engine ---
+// --- Download QR ---
 async function downloadQR(kode_atau_token, tipe) {
     const url = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${kode_atau_token}`;
+
     try {
         const resp = await fetch(url);
         const blob = await resp.blob();
+
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
         a.download = `QR_${tipe}_${kode_atau_token}.png`;
         a.click();
         
-        Swal.fire({ title: 'Tersimpan!', text: 'QR Code diunduh ke perangkat Anda.', icon: 'success', timer: 2000, showConfirmButton: false });
+        Swal.fire({
+            title: 'Tersimpan!',
+            text: 'QR Code diunduh ke perangkat Anda.',
+            icon: 'success',
+            timer: 2000,
+            showConfirmButton: false
+        });
+
     } catch (e) { 
         Swal.fire('Gagal!', 'Terjadi masalah saat mengunduh gambar.', 'error'); 
     }
 }
 
-// ==========================================
-// FITUR BARU: FORMAT RUPIAH OTOMATIS (TOP UP)
-// ==========================================
+// --- Format Rupiah Top Up ---
 function formatRupiahManual(inputElement) {
-    let angka_asli = inputElement.value.replace(/[^0-9]/g, ''); // Buang semua huruf/titik
+    let angka_asli = inputElement.value.replace(/[^0-9]/g, '');
     
-    // Simpan angka asli ke input tersembunyi agar Database PHP tidak error
     let hiddenInput = document.getElementById('nominal_asli');
+
     if (hiddenInput) {
         hiddenInput.value = angka_asli;
     }
 
-    // Pasang titik
     let sisa = angka_asli.length % 3;
     let rupiah = angka_asli.substr(0, sisa);
     let ribuan = angka_asli.substr(sisa).match(/\d{3}/g);
@@ -218,22 +345,25 @@ function formatRupiahManual(inputElement) {
         rupiah += separator + ribuan.join('.');
     }
     
-    // Tampilkan di layar
     inputElement.value = rupiah;
 }
 
-// Menimpa fungsi setNominal bawaan
 function setNominal(angka) {
     let inputTampil = document.getElementById('inputNominal');
     let inputAsli = document.getElementById('nominal_asli');
     
     if (inputTampil && inputAsli) {
         inputAsli.value = angka;
-        // Format otomatis
-        let sisa = angka.toString().length % 3;
-        let rupiah = angka.toString().substr(0, sisa);
-        let ribuan = angka.toString().substr(sisa).match(/\d{3}/g);
-        if (ribuan) rupiah += (sisa ? '.' : '') + ribuan.join('.');
+
+        let angkaStr = angka.toString();
+        let sisa = angkaStr.length % 3;
+        let rupiah = angkaStr.substr(0, sisa);
+        let ribuan = angkaStr.substr(sisa).match(/\d{3}/g);
+
+        if (ribuan) {
+            rupiah += (sisa ? '.' : '') + ribuan.join('.');
+        }
+
         inputTampil.value = rupiah;
     }
 }
