@@ -440,16 +440,17 @@ if ($action == 'update_hardware_slots') {
     ob_clean();
 
     try {
-
         for ($i = 1; $i <= 4; $i++) {
 
-            if (isset($_GET['s'.$i])) {
+            $key = 's' . $i;
 
-                $val = ($_GET['s'.$i] == '1') ? true : false;
+            if (isset($_GET[$key])) {
+
+                $val = ($_GET[$key] == '1') ? 'true' : 'false';
 
                 $stmt = $conn->prepare("
                     UPDATE slot
-                    SET terisi = ?
+                    SET terisi = CAST(? AS boolean)
                     WHERE slot_nomor = ?
                 ");
 
@@ -466,7 +467,6 @@ if ($action == 'update_hardware_slots') {
         ]);
 
     } catch (Exception $e) {
-
         echo json_encode([
             'status' => 'error',
             'message' => $e->getMessage()
@@ -475,6 +475,7 @@ if ($action == 'update_hardware_slots') {
 
     exit;
 }
+
 // 10. ACTION: DELETE USER (KHUSUS ADMIN)
 if ($action == 'delete_user') {
     ob_clean();
