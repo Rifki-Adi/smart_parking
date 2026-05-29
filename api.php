@@ -427,44 +427,39 @@ if ($action == 'get_dashboard_data') {
 if ($action == 'update_hardware_slots') {
     ob_clean();
 
-    $updated = 0;
-
     try {
         for ($i = 1; $i <= 4; $i++) {
             if (isset($_GET['s'.$i])) {
-                $val = ($_GET['s'.$i] == '1') ? 'true' : 'false';
 
-                // PostgreSQL: update hanya kalau nilai benar-benar berubah.
-                // Ini mencegah Supabase ditulis terus-menerus saat ESP32 nyala.
+                $val = ($_GET['s'.$i] == '1') ? true : false;
+
                 $stmt = $conn->prepare("
                     UPDATE slot
-                    SET terisi = CAST(? AS boolean)
+                    SET terisi = ?
                     WHERE slot_nomor = ?
-                    AND terisi IS DISTINCT FROM CAST(? AS boolean)
-                "
-                );
+                ");
 
-                $stmt->execute([$val, $i, $val]);
-                $updated += $stmt->rowCount();
+                $stmt->execute([
+                    $val,
+                    $i
+                ]);
             }
         }
 
         echo json_encode([
             'status' => 'success',
-            'message' => 'Hardware slot sync ok',
-            'updated' => $updated
+            'message' => 'Database slot berhasil diupdate oleh hardware'
         ]);
 
     } catch (Exception $e) {
         echo json_encode([
             'status' => 'error',
-            'message' => 'Gagal update hardware slot'
+            'message' => $e->getMessage()
         ]);
     }
 
     exit;
 }
-
 
 // 10. ACTION: DELETE USER (KHUSUS ADMIN)
 if ($action == 'delete_user') {
