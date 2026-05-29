@@ -40,8 +40,11 @@ function cleanupExpiredReservations($conn) {
 }
 
 // Jalankan cleanup otomatis setiap API dipanggil
-cleanupExpiredReservations($conn);
+$action = isset($_GET['action']) ? $_GET['action'] : '';
 
+if (in_array($action, ['get_slots', 'get_slots_admin'])) {
+    cleanupExpiredReservations($conn);
+}
 
 
 // =============================================
