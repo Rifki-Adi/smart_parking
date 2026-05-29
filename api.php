@@ -80,13 +80,27 @@ if ($action == 'book_slot') {
     $user_saldo = $conn->query("SELECT saldo FROM profiles WHERE id = '$uid'")->fetchColumn();
     if ($user_saldo < 8000) { echo json_encode(['status' => 'error', 'message' => 'Saldo Anda tidak cukup (Min. Rp 8.000: 5rb Booking + 3rb Gerbang). Silakan Top Up.']); exit; }
     
-    $stmt_cek = $conn->prepare("SELECT id FROM reservasi WHERE user_id = ? AND status IN ('pending', 'check-in')");
+    $stmt_cek = $conn->prepare("
+        SELECT id FROM reservasi 
+        WHERE user_id = ? 
+        AND (
+            status = 'check-in' 
+            OR (status = 'pending' AND created_at >= (NOW() - INTERVAL '60 seconds'))
+        )
+    ");
     $stmt_cek->execute([$uid]);
     if ($stmt_cek->fetch()) { echo json_encode(['status' => 'error', 'message' => 'Anda sudah memiliki tiket aktif atau sedang parkir!']); exit; }
     
     $slot = $conn->query("SELECT id FROM slot WHERE slot_nomor = '$slot_nomor'")->fetch();
     
-    $stmt_cek_slot = $conn->prepare("SELECT id FROM reservasi WHERE slot_id = ? AND status IN ('pending', 'check-in')");
+    $stmt_cek_slot = $conn->prepare("
+        SELECT id FROM reservasi 
+        WHERE slot_id = ? 
+        AND (
+            status = 'check-in' 
+            OR (status = 'pending' AND created_at >= (NOW() - INTERVAL '60 seconds'))
+        )
+    ");
     $stmt_cek_slot->execute([$slot['id']]);
     if ($stmt_cek_slot->fetch()) { 
         echo json_encode(['status' => 'error', 'message' => 'Mohon maaf, slot ini baru saja diambil oleh kendaraan di lokasi.']); 
@@ -126,7 +140,8 @@ if ($action == 'get_slots') {
     $res_aktif = $conn->query("
     SELECT slot_id, user_id, status, kode_booking
     FROM reservasi
-    WHERE status IN ('pending', 'check-in')
+    WHERE status = 'check-in'
+       OR (status = 'pending' AND created_at >= (NOW() - INTERVAL '60 seconds'))
     ")->fetchAll(PDO::FETCH_ASSOC);
 
     $map = [];
@@ -231,9 +246,15 @@ if ($action == 'get_slots_admin') {
     ob_clean();
     $slots = $conn->query("SELECT * FROM slot ORDER BY slot_nomor ASC LIMIT 4")->fetchAll(PDO::FETCH_ASSOC);
     
-    $res_info = $conn->query("SELECT r.slot_id, r.status, r.created_at, r.kode_booking, p.nama, p.plat_nomor FROM reservasi r JOIN profiles p ON r.user_id = p.id WHERE r.status IN ('pending', 'check-in')")->fetchAll(PDO::FETCH_ASSOC);
+    $res_info = $conn->query("SELECT r.slot_id, r.status, r.created_at, r.kode_booking, p.nama, p.plat_nomor 
+    FROM reservasi r 
+    JOIN profiles p ON r.user_id = p.id 
+    WHERE r.status = 'check-in'
+       OR (r.status = 'pending' AND r.created_at >= (NOW() - INTERVAL '60 seconds'))")->fetchAll(PDO::FETCH_ASSOC);
     $info_map = []; foreach($res_info as $ri) { $info_map[$ri['slot_id']] = $ri; }
-    $reservasi_aktif = $conn->query("SELECT slot_id FROM reservasi WHERE status IN ('pending', 'check-in')")->fetchAll(PDO::FETCH_COLUMN);
+    $reservasi_aktif = $conn->query("SELECT slot_id FROM reservasi 
+        WHERE status = 'check-in'
+           OR (status = 'pending' AND created_at >= (NOW() - INTERVAL '60 seconds'))")->fetchAll(PDO::FETCH_COLUMN);
     
     $kapasitas_terpakai = 0; $result = [];
     foreach($slots as $s) {
@@ -280,7 +301,12 @@ if ($action == 'gate_scan') {
     
     try {
         if (strpos($qr, 'PK-') === 0) {
-            $stmt = $conn->prepare("SELECT * FROM reservasi WHERE kode_booking = ? AND status IN ('pending', 'check-in')");
+            $stmt = $conn->prepare("SELECT * FROM reservasi 
+                WHERE kode_booking = ? 
+                AND (
+                    status = 'check-in'
+                    OR (status = 'pending' AND created_at >= (NOW() - INTERVAL '60 seconds'))
+                )");
             $stmt->execute([$qr]);
             $booking = $stmt->fetch();
             
@@ -347,10 +373,15 @@ if ($action == 'gate_scan') {
                         exit;
                     }
 
-                    $punya_pending = $conn->query("SELECT id FROM reservasi WHERE user_id = '$uid' AND status = 'pending'")->fetch();
+                    $punya_pending = $conn->query("SELECT id FROM reservasi 
+                        WHERE user_id = '$uid' 
+                        AND status = 'pending' 
+                        AND created_at >= (NOW() - INTERVAL '60 seconds')")->fetch();
                     if ($punya_pending) { echo json_encode(['status' => 'error', 'message' => 'Punya Tiket Aktif!|Gunakan QR Aplikasi']); exit; }
                     
-                    $slot_kosong = $conn->query("SELECT id, slot_nomor FROM slot WHERE terisi = 'false' AND CAST(slot_nomor AS INT) <= 4 AND id NOT IN (SELECT slot_id FROM reservasi WHERE status IN ('pending', 'check-in')) ORDER BY slot_nomor ASC LIMIT 1")->fetch();
+                    $slot_kosong = $conn->query("SELECT id, slot_nomor FROM slot WHERE terisi = 'false' AND CAST(slot_nomor AS INT) <= 4 AND id NOT IN (SELECT slot_id FROM reservasi 
+        WHERE status = 'check-in'
+           OR (status = 'pending' AND created_at >= (NOW() - INTERVAL '60 seconds'))) ORDER BY slot_nomor ASC LIMIT 1")->fetch();
                     if (!$slot_kosong) { echo json_encode(['status' => 'error', 'message' => 'Mohon Maaf...|Parkir Penuh']); exit; }
                     
                     if ($user['saldo'] < 3000) { echo json_encode(['status' => 'error', 'message' => 'Saldo Tdk Cukup!|Min. Rp 3.000']); exit; }
@@ -377,13 +408,21 @@ if ($action == 'get_user_live_data') {
     ob_clean();
     $uid = isset($_GET['uid']) ? $_GET['uid'] : '';
     $saldo = $conn->query("SELECT saldo FROM profiles WHERE id = '$uid'")->fetchColumn();
-    $my_res = $conn->query("SELECT created_at FROM reservasi WHERE user_id = '$uid' AND status = 'pending'")->fetch(PDO::FETCH_ASSOC);
+    $my_res = $conn->query("SELECT created_at FROM reservasi 
+        WHERE user_id = '$uid' 
+        AND status = 'pending'
+        AND created_at >= (NOW() - INTERVAL '60 seconds')")->fetch(PDO::FETCH_ASSOC);
     $time_left = 0; $has_pending = false;
     if ($my_res && !empty($my_res['created_at'])) {
         $clean_date = substr($my_res['created_at'], 0, 19); $elapsed = time() - strtotime($clean_date); $time_left = 60 - $elapsed;
         if ($time_left < 0) $time_left = 0; $has_pending = true;
     }
-    $tiket_aktif = $conn->prepare("SELECT r.*, s.slot_nomor FROM reservasi r JOIN slot s ON r.slot_id = s.id WHERE r.user_id = ? AND r.status IN ('pending', 'check-in') ORDER BY r.created_at DESC");
+    $tiket_aktif = $conn->prepare("SELECT r.*, s.slot_nomor FROM reservasi r JOIN slot s ON r.slot_id = s.id WHERE r.user_id = ? 
+        AND (
+            r.status = 'check-in'
+            OR (r.status = 'pending' AND r.created_at >= (NOW() - INTERVAL '60 seconds'))
+        )
+        ORDER BY r.created_at DESC");
     $tiket_aktif->execute([$uid]);
     $tiket = $tiket_aktif->fetchAll(PDO::FETCH_ASSOC);
     foreach ($tiket as &$t) { $t['tgl_format'] = date('d M Y, H:i', strtotime($t['created_at'])) . ' WIB'; }
@@ -445,6 +484,8 @@ if ($action == 'update_hardware_slots') {
     ob_clean();
 
     try {
+        $updated = 0;
+
         for ($i = 1; $i <= 4; $i++) {
 
             $key = 's' . $i;
@@ -453,22 +494,28 @@ if ($action == 'update_hardware_slots') {
 
                 $val = ($_GET[$key] == '1') ? 'true' : 'false';
 
+                // Update hanya kalau nilai berubah.
+                // Ini mencegah Supabase ditulis terus-menerus saat sensor mengirim nilai yang sama.
                 $stmt = $conn->prepare("
                     UPDATE slot
-                    SET terisi = CAST(? AS boolean)
-                    WHERE slot_nomor = ?
+                    SET terisi = CAST(:val AS boolean)
+                    WHERE slot_nomor = :slot_nomor
+                    AND terisi IS DISTINCT FROM CAST(:val AS boolean)
                 ");
 
                 $stmt->execute([
-                    $val,
-                    $i
+                    ':val' => $val,
+                    ':slot_nomor' => $i
                 ]);
+
+                $updated += $stmt->rowCount();
             }
         }
 
         echo json_encode([
             'status' => 'success',
-            'message' => 'Database slot berhasil diupdate oleh hardware'
+            'message' => 'Hardware slot sync berhasil',
+            'updated' => $updated
         ]);
 
     } catch (Exception $e) {
