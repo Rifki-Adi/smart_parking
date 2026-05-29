@@ -44,16 +44,23 @@ function cleanupExpiredReservations($conn) {
 // BYPASS UNTUK ESP32 HARDWARE DEVICE
 // =============================================
 $action_early = isset($_GET['action']) ? $_GET['action'] : '';
-if (in_array($action_early, ['gate_scan', 'get_slots', 'update_hardware_slots']) && !isset($_SESSION['user_id'])) {
+
+if (
+    in_array(
+        $action_early,
+        [
+            'gate_scan',
+            'get_slots',
+            'get_slots_admin',
+            'update_hardware_slots'
+        ]
+    )
+    && !isset($_SESSION['user_id'])
+) {
+
     $_SESSION['user_id'] = 'esp32_device';
     $_SESSION['role']    = 'admin';
 }
-
-if (!isset($_SESSION['user_id'])) { echo json_encode(['status' => 'error', 'message' => 'Unauthorized']); exit; }
-$action = isset($_GET['action']) ? $_GET['action'] : '';
-
-cleanupExpiredReservations($conn);
-
 // 1. ACTION: RESERVASI SLOT
 if ($action == 'book_slot') {
     $uid = $_POST['user_id'];
@@ -425,10 +432,13 @@ if ($action == 'get_dashboard_data') {
 
 // 9. ACTION: UPDATE DARI SENSOR IR (HARDWARE ESP32) - OPTIMASI ANTI LAG
 if ($action == 'update_hardware_slots') {
+
     ob_clean();
 
     try {
+
         for ($i = 1; $i <= 4; $i++) {
+
             if (isset($_GET['s'.$i])) {
 
                 $val = ($_GET['s'.$i] == '1') ? true : false;
@@ -452,6 +462,7 @@ if ($action == 'update_hardware_slots') {
         ]);
 
     } catch (Exception $e) {
+
         echo json_encode([
             'status' => 'error',
             'message' => $e->getMessage()
@@ -460,7 +471,6 @@ if ($action == 'update_hardware_slots') {
 
     exit;
 }
-
 // 10. ACTION: DELETE USER (KHUSUS ADMIN)
 if ($action == 'delete_user') {
     ob_clean();
