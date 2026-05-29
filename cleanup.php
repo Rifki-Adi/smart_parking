@@ -1,34 +1,28 @@
 <?php
-
 require 'db_config.php';
 
-$stmt = $conn->query("
-SELECT id, user_id, kode_booking, created_at
-FROM reservasi
-WHERE status = 'pending'
-");
+try {
+    $sql = "
+    WITH expired AS (
+        DELETE FROM reservasi
+        WHERE status = 'pending'
+        AND created_at < (NOW() - INTERVAL '60 seconds')
+        RETURNING user_id, kode_booking
+    )
+    INSERT INTO transaksi (user_id, tipe, jumlah, keterangan)
+    SELECT 
+        user_id,
+        'hangus',
+        0,
+        'Waktu Habis Tiket ' || kode_booking
+    FROM expired
+    ";
 
-$data = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $conn->exec($sql);
 
-$current = time();
+    echo "cleanup selesai";
 
-foreach($data as $row){
-
-$created = strtotime(substr($row['created_at'],0,19));
-
-if(($current - $created) > 60){
-
-$del = $conn->prepare("
-DELETE FROM reservasi
-WHERE id = ?
-");
-
-$del->execute([$row['id']]);
-
+} catch (PDOException $e) {
+    echo "error: " . $e->getMessage();
 }
-
-}
-
-echo "cleanup selesai";
-
 ?>
