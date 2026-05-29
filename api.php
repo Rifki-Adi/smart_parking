@@ -59,10 +59,12 @@ if (
     )
     && !isset($_SESSION['user_id'])
 ) {
-
     $_SESSION['user_id'] = 'esp32_device';
     $_SESSION['role']    = 'admin';
 }
+
+$action = isset($_GET['action']) ? $_GET['action'] : '';
+
 // 1. ACTION: RESERVASI SLOT
 if ($action == 'book_slot') {
     $uid = $_POST['user_id'];
