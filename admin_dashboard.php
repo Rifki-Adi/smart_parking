@@ -225,8 +225,8 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
         fetchLiveAdminSlots();
         fetchDashboardData();
         // Meminta data setiap 3 detik (3000ms) untuk mengamankan server Azure
-        intervalAdminSlots = setInterval(fetchLiveAdminSlots, 3000);
-        intervalDashboard = setInterval(fetchDashboardData, 3000);
+        intervalAdminSlots = setInterval(fetchLiveAdminSlots, 10000);
+        intervalDashboard = setInterval(fetchDashboardData, 30000);
     }
 
     function stopAdminPolling() {
