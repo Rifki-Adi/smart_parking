@@ -207,8 +207,8 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
     function startDashboardPolling() {
         fetchUserLiveData();
         fetchLiveSlots();
-        userLiveInterval = setInterval(fetchUserLiveData, 3000);
-        userSlotInterval = setInterval(fetchLiveSlots, 3000);
+        userLiveInterval = setInterval(fetchUserLiveData, 10000);
+        userSlotInterval = setInterval(fetchLiveSlots, 10000);
     }
 
     function stopDashboardPolling() {
@@ -272,7 +272,7 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
         resetFilterModal(false); new bootstrap.Modal(document.getElementById('modalTrx')).show(); fetchAndRenderLive();
         
         // Modal diubah ke 3000ms untuk Anti-Lag
-        if(liveTrxInterval) clearInterval(liveTrxInterval); liveTrxInterval = setInterval(fetchAndRenderLive, 3000);
+        if(liveTrxInterval) clearInterval(liveTrxInterval); liveTrxInterval = setInterval(fetchAndRenderLive, 15000);
     }
     document.getElementById('modalTrx').addEventListener('hidden.bs.modal', function () { clearInterval(liveTrxInterval); });
     
