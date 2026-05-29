@@ -147,8 +147,12 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
                             borderState = 'slot-reserved-admin';
                             innerHtml += `<div class="mt-2 pt-2 border-top border-warning small"><b class="d-block text-truncate" style="color:#b45309;">${slot.user_data.nama}</b><span class="badge bg-warning text-dark mt-1 mb-1">${slot.user_data.plat_nomor}</span><br><span class="badge bg-warning text-dark mt-1 w-100 shadow-sm"><i class="fas fa-bookmark me-1"></i>RESERVED</span></div>`;
                         } else {
-                            let sisa = slot.user_data.sisa_waktu; let m = Math.floor(sisa / 60); let s = sisa % 60; let textWaktu = sisa > 0 ? `Sisa 0${m}:${s < 10 ? '0'+s : s}` : 'Habis / Batal'; let bgWaktu = sisa > 0 ? 'bg-danger' : 'bg-secondary';
-                            innerHtml += `<div class="mt-2 pt-2 border-top border-warning small"><b class="d-block text-truncate" style="color:#b45309;">${slot.user_data.nama}</b><span class="badge bg-warning text-dark mt-1 mb-1">${slot.user_data.plat_nomor}</span><br><span class="badge ${bgWaktu} mt-1 w-100 shadow-sm"><i class="fas fa-clock me-1"></i>${textWaktu}</span></div>`;
+                            let sisa = parseInt(slot.user_data.sisa_waktu || 0);
+                            let m = Math.floor(sisa / 60);
+                            let s = sisa % 60;
+                            let textWaktu = sisa > 0 ? `Sisa ${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}` : 'Habis / Batal';
+                            let bgWaktu = sisa > 0 ? 'bg-danger' : 'bg-secondary';
+                            innerHtml += `<div class="mt-2 pt-2 border-top border-warning small"><b class="d-block text-truncate" style="color:#b45309;">${slot.user_data.nama}</b><span class="badge bg-warning text-dark mt-1 mb-1">${slot.user_data.plat_nomor}</span><br><span class="badge ${bgWaktu} mt-1 w-100 shadow-sm" data-sisa-waktu="${sisa}"><i class="fas fa-clock me-1"></i>${textWaktu}</span></div>`;
                         }
                     }
                 }
@@ -217,27 +221,56 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
         } catch (e) {}
     }
 
-    // --- FITUR 3 DETIK ANTI-LAG (SURVIVAL MODE) ---
-    let intervalAdminSlots;
-    let intervalDashboard;
+    // --- POLLING ADMIN + TIMER LOKAL 1 DETIK ---
+    let intervalAdminSlots = null;
+    let intervalDashboard = null;
+    let intervalAdminTimer = null;
+
+    function updateAdminReservationTimers() {
+        document.querySelectorAll('[data-sisa-waktu]').forEach(el => {
+            let sisa = parseInt(el.dataset.sisaWaktu || 0);
+
+            if (sisa > 0) {
+                sisa--;
+                el.dataset.sisaWaktu = sisa;
+
+                let menit = Math.floor(sisa / 60);
+                let detik = sisa % 60;
+
+                el.innerHTML = `<i class="fas fa-clock me-1"></i>Sisa ${String(menit).padStart(2,'0')}:${String(detik).padStart(2,'0')}`;
+                el.classList.remove('bg-secondary');
+                el.classList.add('bg-danger');
+            } else {
+                el.innerHTML = `<i class="fas fa-clock me-1"></i>Habis`;
+                el.classList.remove('bg-danger');
+                el.classList.add('bg-secondary');
+            }
+        });
+    }
 
     function startAdminPolling() {
+        stopAdminPolling();
+
         fetchLiveAdminSlots();
         fetchDashboardData();
-        // Meminta data setiap 3 detik (3000ms) untuk mengamankan server Azure
+
         intervalAdminSlots = setInterval(fetchLiveAdminSlots, 10000);
         intervalDashboard = setInterval(fetchDashboardData, 30000);
+        intervalAdminTimer = setInterval(updateAdminReservationTimers, 1000);
     }
 
     function stopAdminPolling() {
-        clearInterval(intervalAdminSlots);
-        clearInterval(intervalDashboard);
+        if (intervalAdminSlots) clearInterval(intervalAdminSlots);
+        if (intervalDashboard) clearInterval(intervalDashboard);
+        if (intervalAdminTimer) clearInterval(intervalAdminTimer);
+
+        intervalAdminSlots = null;
+        intervalDashboard = null;
+        intervalAdminTimer = null;
     }
 
-    // Jalankan sistem polling saat web pertama kali terbuka
     startAdminPolling();
 
-    // Hentikan polling otomatis jika Admin berpindah tab agar server bisa beristirahat
     document.addEventListener("visibilitychange", () => {
         if (document.hidden) {
             stopAdminPolling();
