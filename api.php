@@ -423,18 +423,48 @@ if ($action == 'get_dashboard_data') {
     echo json_encode(['total_user' => (int)$total_user, 'total_saldo' => (int)$total_saldo, 'total_pages' => $total_pages, 'current_page' => $page, 'transactions' => $trx]); exit;
 }
 
-// 9. ACTION: UPDATE DARI SENSOR IR (HARDWARE ESP32)
+// 9. ACTION: UPDATE DARI SENSOR IR (HARDWARE ESP32) - OPTIMASI ANTI LAG
 if ($action == 'update_hardware_slots') {
     ob_clean();
-    for ($i = 1; $i <= 4; $i++) {
-        if (isset($_GET['s'.$i])) {
-            $val = $_GET['s'.$i] == '1' ? 'true' : 'false';
-            $conn->query("UPDATE slot SET terisi = '$val' WHERE slot_nomor = '$i'");
+
+    $updated = 0;
+
+    try {
+        for ($i = 1; $i <= 4; $i++) {
+            if (isset($_GET['s'.$i])) {
+                $val = ($_GET['s'.$i] == '1') ? 'true' : 'false';
+
+                // PostgreSQL: update hanya kalau nilai benar-benar berubah.
+                // Ini mencegah Supabase ditulis terus-menerus saat ESP32 nyala.
+                $stmt = $conn->prepare("
+                    UPDATE slot
+                    SET terisi = CAST(? AS boolean)
+                    WHERE slot_nomor = ?
+                    AND terisi IS DISTINCT FROM CAST(? AS boolean)
+                "
+                );
+
+                $stmt->execute([$val, $i, $val]);
+                $updated += $stmt->rowCount();
+            }
         }
+
+        echo json_encode([
+            'status' => 'success',
+            'message' => 'Hardware slot sync ok',
+            'updated' => $updated
+        ]);
+
+    } catch (Exception $e) {
+        echo json_encode([
+            'status' => 'error',
+            'message' => 'Gagal update hardware slot'
+        ]);
     }
-    echo json_encode(['status' => 'success', 'message' => 'Database slot berhasil diupdate oleh hardware']);
+
     exit;
 }
+
 
 // 10. ACTION: DELETE USER (KHUSUS ADMIN)
 if ($action == 'delete_user') {
