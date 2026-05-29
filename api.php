@@ -14,46 +14,34 @@ header('Content-Type: application/json');
 // =============================================
 function cleanupExpiredReservations($conn) {
     try {
+        $expiredAt = date('Y-m-d H:i:s', time() - 60);
+
         $stmt = $conn->prepare("
-            SELECT id, user_id, kode_booking
-            FROM reservasi
-            WHERE status = 'pending'
-            AND EXTRACT(EPOCH FROM (NOW() - created_at::timestamp)) > 60
+            WITH expired AS (
+                DELETE FROM reservasi
+                WHERE status = 'pending'
+                AND created_at < ?
+                RETURNING user_id, kode_booking
+            )
+            INSERT INTO transaksi (user_id, tipe, jumlah, keterangan)
+            SELECT 
+                user_id,
+                'hangus',
+                0,
+                'Waktu Habis Tiket ' || kode_booking
+            FROM expired
         ");
-        $stmt->execute();
-        $expired = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        if (!$expired || count($expired) === 0) {
-            return;
-        }
-
-        $conn->beginTransaction();
-
-        foreach ($expired as $row) {
-            $del = $conn->prepare("DELETE FROM reservasi WHERE id = ? AND status = 'pending'");
-            $del->execute([$row['id']]);
-
-            if ($del->rowCount() > 0) {
-                $log = $conn->prepare("
-                    INSERT INTO transaksi (user_id, tipe, jumlah, keterangan)
-                    VALUES (?, 'hangus', 0, ?)
-                ");
-                $log->execute([
-                    $row['user_id'],
-                    'Waktu Habis Tiket ' . $row['kode_booking']
-                ]);
-            }
-        }
-
-        $conn->commit();
+        $stmt->execute([$expiredAt]);
 
     } catch (Exception $e) {
-        if ($conn->inTransaction()) {
-            $conn->rollBack();
-        }
         // Cleanup jangan sampai bikin API utama gagal.
     }
 }
+
+// Jalankan cleanup otomatis setiap API dipanggil
+cleanupExpiredReservations($conn);
+
 
 
 // =============================================
@@ -78,8 +66,6 @@ if (
 }
 
 $action = isset($_GET['action']) ? $_GET['action'] : '';
-
-cleanupExpiredReservations($conn);
 
 // 1. ACTION: RESERVASI SLOT
 if ($action == 'book_slot') {
