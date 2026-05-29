@@ -8,6 +8,39 @@ date_default_timezone_set('Asia/Jakarta');
 header('Content-Type: application/json');
 
 // =============================================
+// CLEANUP OTOMATIS RESERVASI EXPIRED
+// Pending lebih dari 60 detik akan dihapus,
+// sehingga slot otomatis kembali tersedia.
+// =============================================
+function cleanupExpiredReservations($conn) {
+    try {
+        $expiredAt = date('Y-m-d H:i:s', time() - 60);
+
+        $stmt = $conn->prepare("
+            WITH expired AS (
+                DELETE FROM reservasi
+                WHERE status = 'pending'
+                AND created_at < ?
+                RETURNING user_id, kode_booking
+            )
+            INSERT INTO transaksi (user_id, tipe, jumlah, keterangan)
+            SELECT 
+                user_id,
+                'hangus',
+                0,
+                'Waktu Habis Tiket ' || kode_booking
+            FROM expired
+        ");
+
+        $stmt->execute([$expiredAt]);
+
+    } catch (Exception $e) {
+        // Cleanup jangan sampai bikin API utama gagal.
+    }
+}
+
+
+// =============================================
 // BYPASS UNTUK ESP32 HARDWARE DEVICE
 // =============================================
 $action_early = isset($_GET['action']) ? $_GET['action'] : '';
@@ -18,6 +51,8 @@ if (in_array($action_early, ['gate_scan', 'get_slots', 'update_hardware_slots'])
 
 if (!isset($_SESSION['user_id'])) { echo json_encode(['status' => 'error', 'message' => 'Unauthorized']); exit; }
 $action = isset($_GET['action']) ? $_GET['action'] : '';
+
+cleanupExpiredReservations($conn);
 
 // 1. ACTION: RESERVASI SLOT
 if ($action == 'book_slot') {
@@ -178,20 +213,6 @@ if ($action == 'get_user_trx') {
 // 5. ACTION: GET SLOTS ADMIN
 if ($action == 'get_slots_admin') {
     ob_clean();
-    try {
-        $pending_res = $conn->query("SELECT id, user_id, kode_booking, created_at FROM reservasi WHERE status = 'pending'")->fetchAll(PDO::FETCH_ASSOC);
-        $current_time = strtotime(date('Y-m-d H:i:s'));
-        foreach($pending_res as $exp) {
-            if (!empty($exp['created_at'])) {
-                $clean_date = substr($exp['created_at'], 0, 19);
-                if (($current_time - strtotime($clean_date)) > 60) {
-                    $conn->query("DELETE FROM reservasi WHERE id = " . $exp['id']);
-                    $conn->prepare("INSERT INTO transaksi (user_id, tipe, jumlah, keterangan) VALUES (?, 'hangus', 0, ?)")->execute([$exp['user_id'], 'Waktu Habis Tiket ' . $exp['kode_booking']]);
-                }
-            }
-        }
-    } catch (Exception $e) {}
-
     $slots = $conn->query("SELECT * FROM slot ORDER BY slot_nomor ASC LIMIT 4")->fetchAll(PDO::FETCH_ASSOC);
     
     $res_info = $conn->query("SELECT r.slot_id, r.status, r.created_at, r.kode_booking, p.nama, p.plat_nomor FROM reservasi r JOIN profiles p ON r.user_id = p.id WHERE r.status IN ('pending', 'check-in')")->fetchAll(PDO::FETCH_ASSOC);
