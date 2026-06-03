@@ -118,7 +118,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                             <label class="small fw-bold text-muted mb-1">Alamat Domisili</label>
                             <div class="input-group">
                                 <span class="input-group-text bg-white border-end-0"><i class="fas fa-map-marker-alt text-muted"></i></span>
-                                <textarea name="alamat" class="form-control border-start-0 ps-0" rows="2" placeholder="Alamat lengkap (opsional)"><?= isset($_POST['alamat']) ? htmlspecialchars($_POST['alamat']) : '' ?></textarea>
+                                <textarea name="alamat" class="form-control border-start-0 ps-0" rows="2" placeholder="Alamat"><?= isset($_POST['alamat']) ? htmlspecialchars($_POST['alamat']) : '' ?></textarea>
                             </div>
                         </div>
                         <div class="col-12">
