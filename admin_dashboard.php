@@ -132,7 +132,7 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
 <script>
     const API_URL = "api.php"; // Jika api.php beda server/Azure, ganti ke URL lengkap.
     // REALTIME WEB ADMIN: update ketika ada aktivitas MQTT baru.
-    const MQTT_WEB_URL = "wss://07ea93ea62a6450eb50b1cb6e520eae3.s1.eu.hivemq.cloud:8884/mqt";
+    const MQTT_WEB_URL = "wss://07ea93ea62a6450eb50b1cb6e520eae3.s1.eu.hivemq.cloud:8883/mqtt";
     const MQTT_WEB_USER = "Rifki";
     const MQTT_WEB_PASS = "Kitaaja123";
 
