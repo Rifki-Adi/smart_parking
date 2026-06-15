@@ -154,13 +154,7 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
 
 <script>
     const USER_ID = "<?= $uid ?>";
-    // =====================================================
-    // LINK API AZURE
-    // Ganti bagian LINK-AZURE-KAMU dengan link Azure asli kamu.
-    // Jika website dan api.php berada di Azure yang sama, boleh ubah menjadi: const API_URL = "api.php";
-    // =====================================================
-    const API_URL = "https://smart-parking-rifki-eqfwfbghh3edbyd7.eastasia-01.azurewebsites.net/api.php";
-
+    const API_URL = "api.php"; // Jika api.php beda server/Azure, ganti menjadi: https://nama-app.azurewebsites.net/api.php
 
     let userLiveInterval = null;
     let userSlotInterval = null;
@@ -206,13 +200,15 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
             let data = await res.json();
 
             let elSaldo = document.getElementById('teks-saldo');
-            if(elSaldo) {
-                elSaldo.innerText = 'Rp ' + data.saldo.toLocaleString('id-ID');
+            if (elSaldo && data && typeof data.saldo !== 'undefined') {
+                elSaldo.innerText = 'Rp ' + Number(data.saldo || 0).toLocaleString('id-ID');
             }
 
             userTimeLeft = parseInt(data.time_left || 0);
             updateUserCountdownDisplay();
-        } catch (e) {}
+        } catch (e) {
+            console.error('Gagal ambil data user:', e);
+        }
     }
 
     async function fetchLiveSlots() {
@@ -220,6 +216,13 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
             const response = await fetch(`${API_URL}?action=get_slots&uid=${USER_ID}&_=${Date.now()}`);
             const slots = await response.json();
             
+            if (!Array.isArray(slots)) {
+                console.error('Response get_slots bukan array:', slots);
+                document.getElementById('slot-area-container').innerHTML =
+                    `<div class="col-12 text-center py-4 text-danger fw-bold">Gagal memuat slot. Cek API get_slots.</div>`;
+                return;
+            }
+
             let htmlContainer = '';
 
             slots.forEach(slot => {
@@ -247,7 +250,11 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
             });
 
             document.getElementById('slot-area-container').innerHTML = htmlContainer;
-        } catch (e) {}
+        } catch (e) {
+            console.error('Gagal ambil status slot:', e);
+            document.getElementById('slot-area-container').innerHTML =
+                `<div class="col-12 text-center py-4 text-danger fw-bold">Gagal memuat status slot. Cek koneksi api.php.</div>`;
+        }
     }
 
     function startDashboardPolling() {
@@ -304,21 +311,25 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
             let res = await fetch(`${API_URL}?action=book_slot`, { method: 'POST', body: fd });
             let data = await res.json();
 
-            if(data.status === 'success') {
+            if (data.status === 'success' || data.status === 'accepted') {
                 await Swal.fire({
-                    title: 'Berhasil!',
-                    text: `Reservasi berhasil diamankan.`,
+                    title: data.status === 'accepted' ? 'Dikirim ke MQTT!' : 'Berhasil!',
+                    text: data.message || 'Reservasi sedang diproses.',
                     icon: 'success',
                     confirmButtonColor: '#559da0'
                 });
 
+                // Refresh beberapa kali karena mode MQTT diproses asynchronous oleh mqttreceiver.php.
                 fetchUserLiveData();
                 fetchLiveSlots();
+                setTimeout(() => { fetchUserLiveData(); fetchLiveSlots(); }, 1500);
+                setTimeout(() => { fetchUserLiveData(); fetchLiveSlots(); }, 4000);
             } else {
-                Swal.fire('Gagal!', data.message, 'error');
+                Swal.fire('Gagal!', data.message || 'Reservasi gagal diproses.', 'error');
             }
         } catch (e) {
-            Swal.fire('Error!', 'Koneksi bermasalah.', 'error');
+            console.error('Booking error:', e);
+            Swal.fire('Error!', 'Koneksi bermasalah atau response API bukan JSON.', 'error');
         }
     }
 
@@ -380,9 +391,14 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
     async function fetchAndRenderLive() {
         try {
             const response = await fetch(`${API_URL}?action=get_user_trx&user_id=${USER_ID}&_=${Date.now()}`);
-            globalTrxData = await response.json();
+            const data = await response.json();
+            globalTrxData = Array.isArray(data) ? data : [];
             renderTrxTable();
-        } catch (e) {}
+        } catch (e) {
+            console.error('Gagal ambil riwayat transaksi:', e);
+            document.getElementById('trx_table_body').innerHTML =
+                '<tr><td colspan="4" class="text-center text-danger py-4">Gagal memuat riwayat transaksi. Cek api.php?action=get_user_trx</td></tr>';
+        }
     }
 
     function setSortTrx(colName) {
@@ -467,7 +483,7 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
                 if(t.tipe === 'checkout') { badge = 'bg-dark'; label = 'Check-Out'; }
                 if(t.tipe === 'batal') { badge = 'bg-warning'; label = 'Batal Manual'; }
                 if(t.tipe === 'hangus') { badge = 'bg-danger'; label = 'Hangus'; }
-                if(t.tipe === 'penalty') { badge = 'bg-danger'; label = 'Hangus'; }
+                if(t.tipe === 'penalty') { badge = 'bg-danger'; label = 'Hangus (Data Lama)'; }
 
                 let amount = parseInt(t.jumlah);
                 let prefix = 'Rp ';
