@@ -129,9 +129,16 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
+    // =====================================================
+    // LINK API AZURE
+    // Ganti bagian LINK-AZURE-KAMU dengan link Azure asli kamu.
+    // Jika website dan api.php berada di Azure yang sama, boleh ubah menjadi: const API_URL = "api.php";
+    // =====================================================
+    const API_URL = "https://smart-parking-rifki-eqfwfbghh3edbyd7.eastasia-01.azurewebsites.netapi.php";
+
     async function fetchLiveAdminSlots() {
         try {
-            const res = await fetch(`api.php?action=get_slots_admin&_=${Date.now()}`);
+            const res = await fetch(`${API_URL}?action=get_slots_admin&_=${Date.now()}`);
             const data = await res.json();
             document.getElementById('header-kapasitas').innerText = `Live Slot Monitor (Terisi: ${data.terpakai} / ${data.total})`;
             let htmlContainer = '';
@@ -184,7 +191,7 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
         let fTglMulai = document.getElementById('filter_tgl_mulai').value;
         let fTglSelesai = document.getElementById('filter_tgl_selesai').value;
         try {
-            const res = await fetch(`api.php?action=get_dashboard_data&p=${currentPage}&tipe=${fTipe}&tgl_mulai=${fTglMulai}&tgl_selesai=${fTglSelesai}&sort_col=${currentSortCol}&sort_dir=${currentSortDir}&_=${Date.now()}`);
+            const res = await fetch(`${API_URL}?action=get_dashboard_data&p=${currentPage}&tipe=${fTipe}&tgl_mulai=${fTglMulai}&tgl_selesai=${fTglSelesai}&sort_col=${currentSortCol}&sort_dir=${currentSortDir}&_=${Date.now()}`);
             const data = await res.json();
             document.getElementById('total_user_card').innerText = data.total_user; document.getElementById('total_saldo_card').innerText = 'Rp ' + data.total_saldo.toLocaleString('id-ID');
             

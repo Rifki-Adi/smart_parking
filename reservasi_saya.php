@@ -57,10 +57,17 @@ $uid = $_SESSION['user_id'];
 
 <script>
     const USER_ID = "<?= $uid ?>";
+    // =====================================================
+    // LINK API AZURE
+    // Ganti bagian LINK-AZURE-KAMU dengan link Azure asli kamu.
+    // Jika website dan api.php berada di Azure yang sama, boleh ubah menjadi: const API_URL = "api.php";
+    // =====================================================
+    const API_URL = "https://smart-parking-rifki-eqfwfbghh3edbyd7.eastasia-01.azurewebsites.net/api.php";
+
 
     async function fetchMyTickets() {
         try {
-            let res = await fetch(`api.php?action=get_user_live_data&uid=${USER_ID}&_=${Date.now()}`);
+            let res = await fetch(`${API_URL}?action=get_user_live_data&uid=${USER_ID}&_=${Date.now()}`);
             let data = await res.json();
             
             let container = document.getElementById('ticket-container');
@@ -136,7 +143,7 @@ $uid = $_SESSION['user_id'];
         fd.append('user_id', USER_ID);
 
         try {
-            let res = await fetch('api.php?action=cancel_booking', { method: 'POST', body: fd });
+            let res = await fetch(`${API_URL}?action=cancel_booking`, { method: 'POST', body: fd });
             let data = await res.json();
             if (data.status === 'success') {
                 // MENGEMBALIKAN TOMBOL OK

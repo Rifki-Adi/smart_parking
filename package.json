@@ -1,0 +1,16 @@
+{
+  "name": "smart-parking-mqtt-worker",
+  "version": "1.0.0",
+  "main": "mqttreceiver.js",
+  "scripts": {
+    "start": "node mqttreceiver.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "mqtt": "^5.10.3",
+    "pg": "^8.13.1"
+  },
+  "engines": {
+    "node": "20.x"
+  }
+}

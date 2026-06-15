@@ -154,6 +154,13 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
 
 <script>
     const USER_ID = "<?= $uid ?>";
+    // =====================================================
+    // LINK API AZURE
+    // Ganti bagian LINK-AZURE-KAMU dengan link Azure asli kamu.
+    // Jika website dan api.php berada di Azure yang sama, boleh ubah menjadi: const API_URL = "api.php";
+    // =====================================================
+    const API_URL = "https://smart-parking-rifki-eqfwfbghh3edbyd7.eastasia-01.azurewebsites.net/api.php";
+
 
     let userLiveInterval = null;
     let userSlotInterval = null;
@@ -195,7 +202,7 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
 
     async function fetchUserLiveData() {
         try {
-            let res = await fetch(`api.php?action=get_user_live_data&uid=${USER_ID}&_=${Date.now()}`);
+            let res = await fetch(`${API_URL}?action=get_user_live_data&uid=${USER_ID}&_=${Date.now()}`);
             let data = await res.json();
 
             let elSaldo = document.getElementById('teks-saldo');
@@ -210,7 +217,7 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
 
     async function fetchLiveSlots() {
         try {
-            const response = await fetch(`api.php?action=get_slots&uid=${USER_ID}&_=${Date.now()}`);
+            const response = await fetch(`${API_URL}?action=get_slots&uid=${USER_ID}&_=${Date.now()}`);
             const slots = await response.json();
             
             let htmlContainer = '';
@@ -294,7 +301,7 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
         fd.append('slot_nomor', nomor);
 
         try {
-            let res = await fetch('api.php?action=book_slot', { method: 'POST', body: fd });
+            let res = await fetch(`${API_URL}?action=book_slot`, { method: 'POST', body: fd });
             let data = await res.json();
 
             if(data.status === 'success') {
@@ -372,7 +379,7 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
     
     async function fetchAndRenderLive() {
         try {
-            const response = await fetch(`api.php?action=get_user_trx&user_id=${USER_ID}&_=${Date.now()}`);
+            const response = await fetch(`${API_URL}?action=get_user_trx&user_id=${USER_ID}&_=${Date.now()}`);
             globalTrxData = await response.json();
             renderTrxTable();
         } catch (e) {}
@@ -460,7 +467,7 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
                 if(t.tipe === 'checkout') { badge = 'bg-dark'; label = 'Check-Out'; }
                 if(t.tipe === 'batal') { badge = 'bg-warning'; label = 'Batal Manual'; }
                 if(t.tipe === 'hangus') { badge = 'bg-danger'; label = 'Hangus'; }
-                if(t.tipe === 'penalty') { badge = 'bg-danger'; label = 'Hangus (Data Lama)'; }
+                if(t.tipe === 'penalty') { badge = 'bg-danger'; label = 'Hangus'; }
 
                 let amount = parseInt(t.jumlah);
                 let prefix = 'Rp ';
