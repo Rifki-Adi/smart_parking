@@ -20,7 +20,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 // Untuk localhost boleh isi langsung.
 // Untuk Azure/GitHub, simpan di Application Settings.
 // =====================================================
-define('MQTT_HOST', getenv('MQTT_HOST') ?: '07ea93ea62a6450b50b1cb6e520eae3.s1.eu.hivemq.cloud');
+define('MQTT_HOST', getenv('MQTT_HOST') ?: '07ea93ea62a6450eb50b1cb6e520eae3.s1.eu.hivemq.cloud');
 define('MQTT_PORT', intval(getenv('MQTT_PORT') ?: 8883));
 define('MQTT_USER', getenv('MQTT_USER') ?: 'Rifki');
 define('MQTT_PASS', getenv('MQTT_PASS') ?: 'Kitaaja123');
