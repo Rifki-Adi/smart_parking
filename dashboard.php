@@ -154,7 +154,24 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
 
 <script>
     const USER_ID = "<?= $uid ?>";
-    const API_URL = "api.php"; // Jika api.php beda server/Azure, ganti menjadi: https://nama-app.azurewebsites.net/api.php
+    
+    // FIX FREEZE: request guard agar fetch tidak menumpuk ketika koneksi API/MQTT lambat.
+    const __activeRequests = {};
+    async function guardedFetch(key, url, options = {}) {
+        if (__activeRequests[key]) return null;
+        __activeRequests[key] = true;
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+        try {
+            return await fetch(url, { ...options, signal: controller.signal });
+        } finally {
+            clearTimeout(timeoutId);
+            __activeRequests[key] = false;
+        }
+    }
+const API_URL = "api.php"; // Jika api.php beda server/Azure, ganti menjadi: https://nama-app.azurewebsites.net/api.php
 
     let userLiveInterval = null;
     let userSlotInterval = null;
@@ -196,7 +213,7 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
 
     async function fetchUserLiveData() {
         try {
-            let res = await fetch(`${API_URL}?action=get_user_live_data&uid=${USER_ID}&_=${Date.now()}`);
+            let res = await guardedFetch("user_live", `${API_URL}?action=get_user_live_data&uid=${USER_ID}&_=${Date.now()}`); if (!res) return;
             let data = await res.json();
 
             let elSaldo = document.getElementById('teks-saldo');
@@ -213,7 +230,7 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
 
     async function fetchLiveSlots() {
         try {
-            const response = await fetch(`${API_URL}?action=get_slots&uid=${USER_ID}&_=${Date.now()}`);
+            const response = await guardedFetch("slots", `${API_URL}?action=get_slots&uid=${USER_ID}&_=${Date.now()}`); if (!response) return;
             const slots = await response.json();
             
             if (!Array.isArray(slots)) {
@@ -308,7 +325,7 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
         fd.append('slot_nomor', nomor);
 
         try {
-            let res = await fetch(`${API_URL}?action=book_slot`, { method: 'POST', body: fd });
+            let res = await guardedFetch("book_slot", `${API_URL}?action=book_slot`, { method: \'POST\', body: fd }); if (!res) return;
             let data = await res.json();
 
             if (data.status === 'success' || data.status === 'accepted') {
@@ -390,7 +407,7 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
     
     async function fetchAndRenderLive() {
         try {
-            const response = await fetch(`${API_URL}?action=get_user_trx&user_id=${USER_ID}&_=${Date.now()}`);
+            const response = await guardedFetch("user_trx", `${API_URL}?action=get_user_trx&user_id=${USER_ID}&_=${Date.now()}`); if (!response) return;
             const data = await response.json();
             globalTrxData = Array.isArray(data) ? data : [];
             renderTrxTable();
