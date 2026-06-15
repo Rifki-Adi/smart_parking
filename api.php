@@ -50,8 +50,8 @@ function mqttEncodeLength($length) {
 
 function mqttPublish($topic, $payload) {
     if (
-        MQTT_USER === 'ISI_USERNAME_HIVEMQ' ||
-        MQTT_PASS === 'ISI_PASSWORD_HIVEMQ' ||
+        MQTT_USER === 'Rifki' ||
+        MQTT_PASS === 'Kitaaja123' ||
         empty(MQTT_USER) ||
         empty(MQTT_PASS)
     ) {
