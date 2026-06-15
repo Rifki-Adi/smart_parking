@@ -1,5 +1,6 @@
 {
   "require": {
+    "php-mqtt/client": "^2.1",
     "ext-pdo": "*",
     "ext-pdo_pgsql": "*",
     "ext-pgsql": "*"
