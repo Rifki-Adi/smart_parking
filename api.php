@@ -3,6 +3,8 @@
 error_reporting(0);
 ob_start();
 session_start();
+// FIX FREEZE: lepaskan session lock agar request fetch/ajax tidak saling menunggu.
+if (function_exists('session_write_close')) { session_write_close(); }
 require 'db_config.php';
 date_default_timezone_set('Asia/Jakarta');
 header('Content-Type: application/json');
@@ -48,8 +50,8 @@ function mqttEncodeLength($length) {
 
 function mqttPublish($topic, $payload) {
     if (
-        MQTT_USER === 'Rifki' ||
-        MQTT_PASS === 'Kitaaja123' ||
+        MQTT_USER === 'ISI_USERNAME_HIVEMQ' ||
+        MQTT_PASS === 'ISI_PASSWORD_HIVEMQ' ||
         empty(MQTT_USER) ||
         empty(MQTT_PASS)
     ) {
@@ -79,7 +81,7 @@ function mqttPublish($topic, $payload) {
         'tls://' . MQTT_HOST . ':' . MQTT_PORT,
         $errno,
         $errstr,
-        4,
+        2,
         STREAM_CLIENT_CONNECT,
         $context
     );
@@ -88,7 +90,7 @@ function mqttPublish($topic, $payload) {
         return false;
     }
 
-    stream_set_timeout($socket, 4);
+    stream_set_timeout($socket, 2);
 
     fwrite($socket, $connectPacket);
     $response = fread($socket, 4);
