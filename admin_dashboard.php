@@ -28,6 +28,7 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mqtt/dist/mqtt.min.js"></script>
     <link rel="stylesheet" href="css/style.css">
     <style>
         .th-sortable { cursor: pointer; user-select: none; transition: color 0.2s; }
@@ -129,15 +130,18 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-    // FIX FREEZE: request guard agar fetch admin tidak menumpuk ketika koneksi API/MQTT lambat.
+    const API_URL = "api.php"; // Jika api.php beda server/Azure, ganti ke URL lengkap.
+    // REALTIME WEB ADMIN: update ketika ada aktivitas MQTT baru.
+    const MQTT_WEB_URL = "wss://07ea93ea62a6450eb50b1cb6e520eae3.s1.eu.hivemq.cloud:8884/mqt";
+    const MQTT_WEB_USER = "Rifki";
+    const MQTT_WEB_PASS = "Kitaaja123";
+
     const __activeRequests = {};
     async function guardedFetch(key, url, options = {}) {
         if (__activeRequests[key]) return null;
         __activeRequests[key] = true;
-
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 8000);
-
         try {
             return await fetch(url, { ...options, signal: controller.signal });
         } finally {
@@ -146,7 +150,6 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
         }
     }
 
-    const API_URL = "api.php"; // Jika api.php beda server/Azure, ganti ke URL lengkap.
     async function fetchLiveAdminSlots() {
         try {
             const res = await guardedFetch("admin_slots", `${API_URL}?action=get_slots_admin&_=${Date.now()}`); if (!res) return;
@@ -278,13 +281,58 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
         });
     }
 
+
+    function refreshAdminFromActivity(reason = 'mqtt_activity') {
+        console.log('[ADMIN REALTIME REFRESH]', reason);
+        fetchLiveAdminSlots();
+        fetchDashboardData();
+    }
+
+    function startMqttRealtimeAdmin() {
+        if (typeof mqtt === 'undefined') {
+            console.warn('[MQTT WEB ADMIN] mqtt.js tidak termuat. Fallback polling tetap aktif.');
+            return;
+        }
+
+        const clientId = 'web_admin_' + Math.random().toString(16).slice(2);
+        const webClient = mqtt.connect(MQTT_WEB_URL, {
+            clientId,
+            username: MQTT_WEB_USER,
+            password: MQTT_WEB_PASS,
+            clean: true,
+            connectTimeout: 8000,
+            reconnectPeriod: 4000
+        });
+
+        webClient.on('connect', () => {
+            console.log('[MQTT WEB ADMIN] Connected');
+            webClient.subscribe('smartparking/server/#', { qos: 0 });
+            refreshAdminFromActivity('mqtt_connected');
+        });
+
+        webClient.on('message', (topic, buffer) => {
+            console.log('[MQTT WEB ADMIN RECEIVE]', topic, buffer.toString());
+            if (
+                topic === 'smartparking/server/slot/state' ||
+                topic.startsWith('smartparking/server/reservation/') ||
+                topic.startsWith('smartparking/server/gate/') ||
+                topic.startsWith('smartparking/server/transaction/') ||
+                topic === 'smartparking/server/error'
+            ) {
+                refreshAdminFromActivity(topic);
+            }
+        });
+
+        webClient.on('error', (err) => console.warn('[MQTT WEB ADMIN ERROR]', err.message));
+    }
+
     function startAdminPolling() {
         stopAdminPolling();
 
         fetchLiveAdminSlots();
         fetchDashboardData();
 
-        intervalAdminSlots = setInterval(fetchLiveAdminSlots, 10000);
+        intervalAdminSlots = setInterval(fetchLiveAdminSlots, 30000); // fallback, realtime utama via MQTT WebSocket
         intervalDashboard = setInterval(fetchDashboardData, 30000);
         intervalAdminTimer = setInterval(updateAdminReservationTimers, 1000);
     }
@@ -300,6 +348,7 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
     }
 
     startAdminPolling();
+    startMqttRealtimeAdmin();
 
     document.addEventListener("visibilitychange", () => {
         if (document.hidden) {
