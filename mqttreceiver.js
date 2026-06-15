@@ -5,7 +5,7 @@ const { Pool } = require('pg');
 // =====================================================
 // ENV CONFIG
 // =====================================================
-const MQTT_HOST = process.env.MQTT_HOST || '07ea93ea62a6450b50b1cb6e520eae3.s1.eu.hivemq.cloud';
+const MQTT_HOST = process.env.MQTT_HOST || '07ea93ea62a6450eb50b1cb6e520eae3.s1.eu.hivemq.cloud';
 const MQTT_PORT = Number(process.env.MQTT_PORT || 8883);
 const MQTT_USER = process.env.MQTT_USER || 'Rifki';
 const MQTT_PASS = process.env.MQTT_PASS || 'Kitaaja123';
