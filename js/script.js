@@ -1,9 +1,5 @@
-// =====================================================
-// LINK API AZURE
-// Ganti bagian LINK-AZURE-KAMU dengan link Azure asli kamu.
-// Jika website dan api.php berada di Azure yang sama, boleh ubah menjadi: const API_URL = "api.php";
-// =====================================================
-const API_URL = "https://smart-parking-rifki-eqfwfbghh3edbyd7.eastasia-01.azurewebsites.net/api.php";
+// API endpoint. Jika api.php berada satu folder, biarkan 'api.php'.
+const API_URL = 'api.php';
 
 let liveSlotInterval = null;
 let userLiveInterval = null;
@@ -204,7 +200,7 @@ async function bookingSlot(nomor) {
 
         let data = await res.json();
 
-        if (data.status === 'success') {
+        if (data.status === 'success' || data.status === 'accepted') {
             await Swal.fire({
                 title: 'Berhasil!',
                 text: `Reservasi berhasil diamankan.`,
@@ -260,7 +256,7 @@ async function cancelBooking(kode) {
 
         let data = await res.json();
 
-        if (data.status === 'success') {
+        if (data.status === 'success' || data.status === 'accepted') {
             await Swal.fire({
                 icon: 'success',
                 title: 'Berhasil!',
