@@ -129,13 +129,7 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-    // =====================================================
-    // LINK API AZURE
-    // Ganti bagian LINK-AZURE-KAMU dengan link Azure asli kamu.
-    // Jika website dan api.php berada di Azure yang sama, boleh ubah menjadi: const API_URL = "api.php";
-    // =====================================================
-    const API_URL = "https://smart-parking-rifki-eqfwfbghh3edbyd7.eastasia-01.azurewebsites.netapi.php";
-
+    const API_URL = "api.php"; // Jika api.php beda server/Azure, ganti ke URL lengkap.
     async function fetchLiveAdminSlots() {
         try {
             const res = await fetch(`${API_URL}?action=get_slots_admin&_=${Date.now()}`);
@@ -166,7 +160,13 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
                 htmlContainer += `<div class="col"><div id="slot-box-${slot.slot_nomor}" class="slot-card p-3 border rounded-4 text-center ${borderState}" style="min-height: 140px;">${innerHtml}</div></div>`;
             });
             document.getElementById('slot-area-container').innerHTML = htmlContainer;
-        } catch (e) {}
+        } catch (e) {
+            console.error("Gagal ambil slot admin:", e);
+            const el = document.getElementById('slot-area-container');
+            if (el) {
+                el.innerHTML = `<div class="col-12 text-center text-danger py-4">Gagal memuat status slot. Cek api.php?action=get_slots_admin</div>`;
+            }
+        }
     }
 
     let currentPage = 1; let currentSortCol = 'created_at'; let currentSortDir = 'desc';
@@ -225,7 +225,13 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
                 pHtml += `<li class="page-item ${data.current_page >= data.total_pages ? 'disabled' : ''}"><a class="page-link shadow-sm border-0 rounded" href="#" onclick="changePage(${data.current_page + 1}); return false;">Next &raquo;</a></li></ul>`;
                 pagContainer.innerHTML = pHtml;
             } else { pagContainer.innerHTML = ''; }
-        } catch (e) {}
+        } catch (e) {
+            console.error("Gagal ambil dashboard data:", e);
+            const tbody = document.getElementById('trx_table_body');
+            if (tbody) {
+                tbody.innerHTML = `<tr><td colspan="4" class="text-center text-danger py-4">Gagal memuat riwayat transaksi. Cek api.php?action=get_dashboard_data</td></tr>`;
+            }
+        }
     }
 
     // --- POLLING ADMIN + TIMER LOKAL 1 DETIK ---
