@@ -3,7 +3,7 @@
 error_reporting(0);
 ob_start();
 session_start();
-// FIX FREEZE: lepaskan session lock agar request fetch/ajax tidak saling menunggu.
+// FIX: lepaskan session lock agar AJAX/fetch tidak antre dan web tidak freeze.
 if (function_exists('session_write_close')) { session_write_close(); }
 require 'db_config.php';
 date_default_timezone_set('Asia/Jakarta');
