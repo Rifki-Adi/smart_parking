@@ -315,13 +315,6 @@ $users = $stmt_users->fetchAll();
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-    // =====================================================
-    // LINK API AZURE
-    // Ganti bagian LINK-AZURE-KAMU dengan link Azure asli kamu.
-    // Jika website dan api.php berada di Azure yang sama, boleh ubah menjadi: const API_URL = "api.php";
-    // =====================================================
-    const API_URL = "https://smart-parking-rifki-eqfwfbghh3edbyd7.eastasia-01.azurewebsites.net/api.php";
-
     <?php if(isset($_SESSION['success_msg'])): ?>
         Swal.fire({ icon: 'success', title: 'Berhasil!', text: '<?= $_SESSION['success_msg'] ?>', timer: 2000, showConfirmButton: false });
         <?php unset($_SESSION['success_msg']); ?>
@@ -358,7 +351,7 @@ $users = $stmt_users->fetchAll();
                 let fd = new FormData();
                 fd.append('user_id', userId);
                 
-                fetch(`${API_URL}?action=delete_user`, { method: 'POST', body: fd })
+                fetch('api.php?action=delete_user', { method: 'POST', body: fd })
                 .then(res => res.json())
                 .then(data => {
                     if (data.status === 'success') {
@@ -391,7 +384,7 @@ $users = $stmt_users->fetchAll();
 
     async function fetchAndRenderLive() {
         if(!currentOpenUserId) return;
-        try { const response = await fetch(`${API_URL}?action=get_user_trx&user_id=${currentOpenUserId}&_=${Date.now()}`); globalTrxData = await response.json(); renderTrxTable(); } catch (e) {}
+        try { const response = await fetch(`api.php?action=get_user_trx&user_id=${currentOpenUserId}&_=${Date.now()}`); globalTrxData = await response.json(); renderTrxTable(); } catch (e) {}
     }
 
     function setSortTrx(colName) {

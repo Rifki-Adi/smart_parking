@@ -26,7 +26,6 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-    <script src="https://cdn.jsdelivr.net/npm/mqtt/dist/mqtt.min.js"></script>
     <link rel="stylesheet" href="css/style.css">
     <style>
         .th-sortable { cursor: pointer; user-select: none; transition: color 0.2s; }
@@ -155,26 +154,6 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
 
 <script>
     const USER_ID = "<?= $uid ?>";
-    const API_URL = "api.php"; // Jika api.php beda server/Azure, ganti menjadi: https://nama-app.azurewebsites.net/api.php
-    // REALTIME WEB: browser subscribe MQTT via WebSocket, jadi web update saat ada aktivitas baru.
-    const MQTT_WEB_URL = "wss://07ea93ea62a6450eb50b1cb6e520eae3.s1.eu.hivemq.cloud:8883/mqtt";
-    const MQTT_WEB_USER = "Rifki";
-    const MQTT_WEB_PASS = "Kitaaja123";
-
-    const __activeRequests = {};
-    async function guardedFetch(key, url, options = {}) {
-        if (__activeRequests[key]) return null;
-        __activeRequests[key] = true;
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 8000);
-        try {
-            return await fetch(url, { ...options, signal: controller.signal });
-        } finally {
-            clearTimeout(timeoutId);
-            __activeRequests[key] = false;
-        }
-    }
-
 
     let userLiveInterval = null;
     let userSlotInterval = null;
@@ -216,33 +195,24 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
 
     async function fetchUserLiveData() {
         try {
-            let res = await guardedFetch("user_live", `${API_URL}?action=get_user_live_data&uid=${USER_ID}&_=${Date.now()}`); if (!res) return;
+            let res = await fetch(`api.php?action=get_user_live_data&uid=${USER_ID}&_=${Date.now()}`);
             let data = await res.json();
 
             let elSaldo = document.getElementById('teks-saldo');
-            if (elSaldo && data && typeof data.saldo !== 'undefined') {
-                elSaldo.innerText = 'Rp ' + Number(data.saldo || 0).toLocaleString('id-ID');
+            if(elSaldo) {
+                elSaldo.innerText = 'Rp ' + data.saldo.toLocaleString('id-ID');
             }
 
             userTimeLeft = parseInt(data.time_left || 0);
             updateUserCountdownDisplay();
-        } catch (e) {
-            console.error('Gagal ambil data user:', e);
-        }
+        } catch (e) {}
     }
 
     async function fetchLiveSlots() {
         try {
-            const response = await guardedFetch("slots", `${API_URL}?action=get_slots&uid=${USER_ID}&_=${Date.now()}`); if (!response) return;
+            const response = await fetch(`api.php?action=get_slots&uid=${USER_ID}&_=${Date.now()}`);
             const slots = await response.json();
             
-            if (!Array.isArray(slots)) {
-                console.error('Response get_slots bukan array:', slots);
-                document.getElementById('slot-area-container').innerHTML =
-                    `<div class="col-12 text-center py-4 text-danger fw-bold">Gagal memuat slot. Cek API get_slots.</div>`;
-                return;
-            }
-
             let htmlContainer = '';
 
             slots.forEach(slot => {
@@ -270,61 +240,7 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
             });
 
             document.getElementById('slot-area-container').innerHTML = htmlContainer;
-        } catch (e) {
-            console.error('Gagal ambil status slot:', e);
-            document.getElementById('slot-area-container').innerHTML =
-                `<div class="col-12 text-center py-4 text-danger fw-bold">Gagal memuat status slot. Cek koneksi api.php.</div>`;
-        }
-    }
-
-
-    function refreshDashboardFromActivity(reason = 'mqtt_activity') {
-        console.log('[WEB REALTIME REFRESH]', reason);
-        fetchUserLiveData();
-        fetchLiveSlots();
-        const modal = document.getElementById('modalTrx');
-        if (modal && modal.classList.contains('show')) fetchAndRenderLive();
-    }
-
-    function startMqttRealtimeUser() {
-        if (typeof mqtt === 'undefined') {
-            console.warn('[MQTT WEB] mqtt.js tidak termuat. Fallback polling tetap aktif.');
-            return;
-        }
-
-        const clientId = 'web_user_' + USER_ID.substring(0, 8) + '_' + Math.random().toString(16).slice(2);
-        const webClient = mqtt.connect(MQTT_WEB_URL, {
-            clientId,
-            username: MQTT_WEB_USER,
-            password: MQTT_WEB_PASS,
-            clean: true,
-            connectTimeout: 8000,
-            reconnectPeriod: 4000
-        });
-
-        webClient.on('connect', () => {
-            console.log('[MQTT WEB] Connected');
-            webClient.subscribe('smartparking/server/#', { qos: 0 });
-            refreshDashboardFromActivity('mqtt_connected');
-        });
-
-        webClient.on('message', (topic, buffer) => {
-            const msg = buffer.toString();
-            console.log('[MQTT WEB RECEIVE]', topic, msg);
-
-            if (
-                topic === 'smartparking/server/slot/state' ||
-                topic.startsWith('smartparking/server/reservation/') ||
-                topic.startsWith('smartparking/server/gate/') ||
-                topic.startsWith('smartparking/server/transaction/') ||
-                topic === 'smartparking/server/error'
-            ) {
-                refreshDashboardFromActivity(topic);
-            }
-        });
-
-        webClient.on('error', (err) => console.warn('[MQTT WEB ERROR]', err.message));
-        webClient.on('reconnect', () => console.log('[MQTT WEB] Reconnecting...'));
+        } catch (e) {}
     }
 
     function startDashboardPolling() {
@@ -334,8 +250,8 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
         fetchLiveSlots();
         startUserLocalTimer();
 
-        userLiveInterval = setInterval(fetchUserLiveData, 30000); // fallback saja, realtime utama via MQTT WebSocket
-        userSlotInterval = setInterval(fetchLiveSlots, 30000); // fallback saja, realtime utama via MQTT WebSocket
+        userLiveInterval = setInterval(fetchUserLiveData, 10000);
+        userSlotInterval = setInterval(fetchLiveSlots, 10000);
     }
 
     function stopDashboardPolling() {
@@ -347,7 +263,6 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
     }
 
     startDashboardPolling();
-    startMqttRealtimeUser();
 
     document.addEventListener("visibilitychange", () => {
         if (document.hidden) {
@@ -379,28 +294,24 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
         fd.append('slot_nomor', nomor);
 
         try {
-            let res = await guardedFetch("book_slot", `${API_URL}?action=book_slot`, { method: 'POST', body: fd }); if (!res) return;
+            let res = await fetch('api.php?action=book_slot', { method: 'POST', body: fd });
             let data = await res.json();
 
-            if (data.status === 'success' || data.status === 'accepted') {
+            if(data.status === 'success') {
                 await Swal.fire({
-                    title: data.status === 'accepted' ? 'Dikirim ke MQTT!' : 'Berhasil!',
-                    text: data.message || 'Reservasi sedang diproses.',
+                    title: 'Berhasil!',
+                    text: `Reservasi berhasil diamankan.`,
                     icon: 'success',
                     confirmButtonColor: '#559da0'
                 });
 
-                // Refresh beberapa kali karena mode MQTT diproses asynchronous oleh mqttreceiver.php.
                 fetchUserLiveData();
                 fetchLiveSlots();
-                setTimeout(() => { fetchUserLiveData(); fetchLiveSlots(); }, 1500);
-                setTimeout(() => { fetchUserLiveData(); fetchLiveSlots(); }, 4000);
             } else {
-                Swal.fire('Gagal!', data.message || 'Reservasi gagal diproses.', 'error');
+                Swal.fire('Gagal!', data.message, 'error');
             }
         } catch (e) {
-            console.error('Booking error:', e);
-            Swal.fire('Error!', 'Koneksi bermasalah atau response API bukan JSON.', 'error');
+            Swal.fire('Error!', 'Koneksi bermasalah.', 'error');
         }
     }
 
@@ -461,15 +372,10 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
     
     async function fetchAndRenderLive() {
         try {
-            const response = await guardedFetch("user_trx", `${API_URL}?action=get_user_trx&user_id=${USER_ID}&_=${Date.now()}`); if (!response) return;
-            const data = await response.json();
-            globalTrxData = Array.isArray(data) ? data : [];
+            const response = await fetch(`api.php?action=get_user_trx&user_id=${USER_ID}&_=${Date.now()}`);
+            globalTrxData = await response.json();
             renderTrxTable();
-        } catch (e) {
-            console.error('Gagal ambil riwayat transaksi:', e);
-            document.getElementById('trx_table_body').innerHTML =
-                '<tr><td colspan="4" class="text-center text-danger py-4">Gagal memuat riwayat transaksi. Cek api.php?action=get_user_trx</td></tr>';
-        }
+        } catch (e) {}
     }
 
     function setSortTrx(colName) {

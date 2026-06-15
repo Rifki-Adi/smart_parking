@@ -28,7 +28,6 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-    <script src="https://cdn.jsdelivr.net/npm/mqtt/dist/mqtt.min.js"></script>
     <link rel="stylesheet" href="css/style.css">
     <style>
         .th-sortable { cursor: pointer; user-select: none; transition: color 0.2s; }
@@ -130,29 +129,9 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-    const API_URL = "api.php"; // Jika api.php beda server/Azure, ganti ke URL lengkap.
-    // REALTIME WEB ADMIN: update ketika ada aktivitas MQTT baru.
-    const MQTT_WEB_URL = "wss://07ea93ea62a6450eb50b1cb6e520eae3.s1.eu.hivemq.cloud:8883/mqtt";
-    const MQTT_WEB_USER = "Rifki";
-    const MQTT_WEB_PASS = "Kitaaja123";
-
-    const __activeRequests = {};
-    async function guardedFetch(key, url, options = {}) {
-        if (__activeRequests[key]) return null;
-        __activeRequests[key] = true;
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 8000);
-        try {
-            return await fetch(url, { ...options, signal: controller.signal });
-        } finally {
-            clearTimeout(timeoutId);
-            __activeRequests[key] = false;
-        }
-    }
-
     async function fetchLiveAdminSlots() {
         try {
-            const res = await guardedFetch("admin_slots", `${API_URL}?action=get_slots_admin&_=${Date.now()}`); if (!res) return;
+            const res = await fetch(`api.php?action=get_slots_admin&_=${Date.now()}`);
             const data = await res.json();
             document.getElementById('header-kapasitas').innerText = `Live Slot Monitor (Terisi: ${data.terpakai} / ${data.total})`;
             let htmlContainer = '';
@@ -180,13 +159,7 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
                 htmlContainer += `<div class="col"><div id="slot-box-${slot.slot_nomor}" class="slot-card p-3 border rounded-4 text-center ${borderState}" style="min-height: 140px;">${innerHtml}</div></div>`;
             });
             document.getElementById('slot-area-container').innerHTML = htmlContainer;
-        } catch (e) {
-            console.error("Gagal ambil slot admin:", e);
-            const el = document.getElementById('slot-area-container');
-            if (el) {
-                el.innerHTML = `<div class="col-12 text-center text-danger py-4">Gagal memuat status slot. Cek api.php?action=get_slots_admin</div>`;
-            }
-        }
+        } catch (e) {}
     }
 
     let currentPage = 1; let currentSortCol = 'created_at'; let currentSortDir = 'desc';
@@ -211,7 +184,7 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
         let fTglMulai = document.getElementById('filter_tgl_mulai').value;
         let fTglSelesai = document.getElementById('filter_tgl_selesai').value;
         try {
-            const res = await guardedFetch("admin_data", `${API_URL}?action=get_dashboard_data&p=${currentPage}&tipe=${fTipe}&tgl_mulai=${fTglMulai}&tgl_selesai=${fTglSelesai}&sort_col=${currentSortCol}&sort_dir=${currentSortDir}&_=${Date.now()}`); if (!res) return;
+            const res = await fetch(`api.php?action=get_dashboard_data&p=${currentPage}&tipe=${fTipe}&tgl_mulai=${fTglMulai}&tgl_selesai=${fTglSelesai}&sort_col=${currentSortCol}&sort_dir=${currentSortDir}&_=${Date.now()}`);
             const data = await res.json();
             document.getElementById('total_user_card').innerText = data.total_user; document.getElementById('total_saldo_card').innerText = 'Rp ' + data.total_saldo.toLocaleString('id-ID');
             
@@ -245,13 +218,7 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
                 pHtml += `<li class="page-item ${data.current_page >= data.total_pages ? 'disabled' : ''}"><a class="page-link shadow-sm border-0 rounded" href="#" onclick="changePage(${data.current_page + 1}); return false;">Next &raquo;</a></li></ul>`;
                 pagContainer.innerHTML = pHtml;
             } else { pagContainer.innerHTML = ''; }
-        } catch (e) {
-            console.error("Gagal ambil dashboard data:", e);
-            const tbody = document.getElementById('trx_table_body');
-            if (tbody) {
-                tbody.innerHTML = `<tr><td colspan="4" class="text-center text-danger py-4">Gagal memuat riwayat transaksi. Cek api.php?action=get_dashboard_data</td></tr>`;
-            }
-        }
+        } catch (e) {}
     }
 
     // --- POLLING ADMIN + TIMER LOKAL 1 DETIK ---
@@ -281,58 +248,13 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
         });
     }
 
-
-    function refreshAdminFromActivity(reason = 'mqtt_activity') {
-        console.log('[ADMIN REALTIME REFRESH]', reason);
-        fetchLiveAdminSlots();
-        fetchDashboardData();
-    }
-
-    function startMqttRealtimeAdmin() {
-        if (typeof mqtt === 'undefined') {
-            console.warn('[MQTT WEB ADMIN] mqtt.js tidak termuat. Fallback polling tetap aktif.');
-            return;
-        }
-
-        const clientId = 'web_admin_' + Math.random().toString(16).slice(2);
-        const webClient = mqtt.connect(MQTT_WEB_URL, {
-            clientId,
-            username: MQTT_WEB_USER,
-            password: MQTT_WEB_PASS,
-            clean: true,
-            connectTimeout: 8000,
-            reconnectPeriod: 4000
-        });
-
-        webClient.on('connect', () => {
-            console.log('[MQTT WEB ADMIN] Connected');
-            webClient.subscribe('smartparking/server/#', { qos: 0 });
-            refreshAdminFromActivity('mqtt_connected');
-        });
-
-        webClient.on('message', (topic, buffer) => {
-            console.log('[MQTT WEB ADMIN RECEIVE]', topic, buffer.toString());
-            if (
-                topic === 'smartparking/server/slot/state' ||
-                topic.startsWith('smartparking/server/reservation/') ||
-                topic.startsWith('smartparking/server/gate/') ||
-                topic.startsWith('smartparking/server/transaction/') ||
-                topic === 'smartparking/server/error'
-            ) {
-                refreshAdminFromActivity(topic);
-            }
-        });
-
-        webClient.on('error', (err) => console.warn('[MQTT WEB ADMIN ERROR]', err.message));
-    }
-
     function startAdminPolling() {
         stopAdminPolling();
 
         fetchLiveAdminSlots();
         fetchDashboardData();
 
-        intervalAdminSlots = setInterval(fetchLiveAdminSlots, 30000); // fallback, realtime utama via MQTT WebSocket
+        intervalAdminSlots = setInterval(fetchLiveAdminSlots, 10000);
         intervalDashboard = setInterval(fetchDashboardData, 30000);
         intervalAdminTimer = setInterval(updateAdminReservationTimers, 1000);
     }
@@ -348,7 +270,6 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
     }
 
     startAdminPolling();
-    startMqttRealtimeAdmin();
 
     document.addEventListener("visibilitychange", () => {
         if (document.hidden) {
