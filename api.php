@@ -9,11 +9,7 @@ header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type');
-
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    ob_clean();
-    exit;
-}
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { ob_clean(); exit; }
 
 // =====================================================
 // MQTT CONFIG HIVEMQ CLOUD
@@ -52,8 +48,8 @@ function mqttEncodeLength($length) {
 
 function mqttPublish($topic, $payload) {
     if (
-        MQTT_USER === 'ISI_USERNAME_HIVEMQ' ||
-        MQTT_PASS === 'ISI_PASSWORD_HIVEMQ' ||
+        MQTT_USER === 'Rifki' ||
+        MQTT_PASS === 'Kitaaja123' ||
         empty(MQTT_USER) ||
         empty(MQTT_PASS)
     ) {
@@ -177,6 +173,36 @@ function publishCurrentSlotState($conn, $source = 'api.php') {
     }
 }
 
+
+function cleanupExpiredReservations($conn) {
+    try {
+        $stmt = $conn->prepare("\n            DELETE FROM reservasi\n            WHERE status = 'pending'\n              AND created_at < " . cutoffExpiredSql() . "\n            RETURNING id, user_id, slot_id, kode_booking\n        ");
+        $stmt->execute();
+        $expired = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        foreach ($expired as $row) {
+            $trx = $conn->prepare("\n                INSERT INTO transaksi (user_id, tipe, jumlah, keterangan)\n                VALUES (?, 'hangus', 0, ?)\n            ");
+            $trx->execute([$row['user_id'], 'Waktu Habis Tiket ' . $row['kode_booking']]);
+        }
+
+        if (count($expired) > 0) {
+            publishMqttEvent('smartparking/server/reservation/expired', [
+                'event' => 'reservation_expired',
+                'status' => 'expired',
+                'count' => count($expired),
+                'data' => $expired
+            ]);
+
+            // Penting: setelah auto release, publish ulang slot state agar ESP32/prototype tidak tetap kuning.
+            publishCurrentSlotState($conn, 'auto_release_api');
+        }
+
+        return count($expired);
+    } catch (Exception $e) {
+        return 0;
+    }
+}
+
 // =====================================================
 // ACTION
 // =====================================================
@@ -186,6 +212,21 @@ $action = isset($_GET['action']) ? $_GET['action'] : '';
 if (in_array($action, ['get_slots', 'get_slots_admin', 'get_user_live_data', 'get_user_trx', 'get_dashboard_data']) && !isset($_SESSION['user_id'])) {
     $_SESSION['user_id'] = isset($_GET['uid']) ? $_GET['uid'] : 'esp32_device';
     $_SESSION['role'] = 'admin';
+}
+
+
+// Cleanup otomatis untuk reservasi pending yang sudah melewati batas waktu.
+// Jika ada data expired, API akan publish ulang smartparking/server/slot/state.
+if (in_array($action, [
+    'book_slot',
+    'get_slots',
+    'get_slots_admin',
+    'get_user_live_data',
+    'gate_scan',
+    'cancel_booking',
+    'publish_slot_state'
+])) {
+    cleanupExpiredReservations($conn);
 }
 
 // 1. TEST MQTT
