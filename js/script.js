@@ -1,6 +1,27 @@
 // API endpoint. Jika api.php berada satu folder, biarkan 'api.php'.
 const API_URL = 'api.php';
 
+// FIX: cegah fetch menumpuk.
+const __activeRequests = {};
+async function guardedFetch(key, url, options = {}) {
+    if (__activeRequests[key]) return null;
+    __activeRequests[key] = true;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    try {
+        return await fetch(url, { ...options, signal: controller.signal });
+    } finally {
+        clearTimeout(timeoutId);
+        __activeRequests[key] = false;
+    }
+}
+
+// Realtime web via MQTT WebSocket. Pastikan halaman memuat mqtt.min.js jika memakai script.js ini.
+const MQTT_WEB_URL = "wss://07ea93ea62a6450eb50b1cb6e520eae3.s1.eu.hivemq.cloud:8883/mqtt";
+const MQTT_WEB_USER = "Rifki";
+const MQTT_WEB_PASS = "Kitaaja123";
+
+
 let liveSlotInterval = null;
 let userLiveInterval = null;
 let timerInterval = null;
@@ -13,7 +34,7 @@ async function fetchLiveSlots() {
     try {
         const uid = typeof USER_ID !== 'undefined' ? USER_ID : '';
 
-        const response = await fetch(`${API_URL}?action=get_slots&uid=${uid}&_=${Date.now()}`);
+        const response = await guardedFetch("slots", `${API_URL}?action=get_slots&uid=${uid}&_=${Date.now()}`); if (!response) return;
         const slots = await response.json();
 
         slots.forEach(slot => {
@@ -73,7 +94,7 @@ async function fetchUserLiveData() {
     try {
         const uid = typeof USER_ID !== 'undefined' ? USER_ID : '';
 
-        const response = await fetch(`${API_URL}?action=get_user_live_data&uid=${uid}&_=${Date.now()}`);
+        const response = await guardedFetch("user_live", `${API_URL}?action=get_user_live_data&uid=${uid}&_=${Date.now()}`); if (!response) return;
         const data = await response.json();
 
         liveTimeLeft = parseInt(data.time_left || 0);
@@ -132,8 +153,8 @@ function startUserPolling() {
 
     startLocalTimer();
 
-    liveSlotInterval = setInterval(fetchLiveSlots, 10000);
-    userLiveInterval = setInterval(fetchUserLiveData, 10000);
+    liveSlotInterval = setInterval(fetchLiveSlots, 30000);
+    userLiveInterval = setInterval(fetchUserLiveData, 30000);
 }
 
 function stopUserPolling() {
@@ -193,10 +214,10 @@ async function bookingSlot(nomor) {
     fd.append('slot_nomor', nomor);
 
     try {
-        let res = await fetch(`${API_URL}?action=book_slot`, {
+        let res = await guardedFetch('book_slot', `${API_URL}?action=book_slot`, {
             method: 'POST',
             body: fd
-        });
+        }); if (!res) return;
 
         let data = await res.json();
 
@@ -249,10 +270,10 @@ async function cancelBooking(kode) {
     fd.append('user_id', USER_ID);
 
     try {
-        let res = await fetch(`${API_URL}?action=cancel_booking`, {
+        let res = await guardedFetch('cancel_booking', `${API_URL}?action=cancel_booking`, {
             method: 'POST',
             body: fd
-        });
+        }); if (!res) return;
 
         let data = await res.json();
 
