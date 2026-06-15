@@ -26,6 +26,7 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mqtt/dist/mqtt.min.js"></script>
     <link rel="stylesheet" href="css/style.css">
     <style>
         .th-sortable { cursor: pointer; user-select: none; transition: color 0.2s; }
@@ -154,16 +155,18 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
 
 <script>
     const USER_ID = "<?= $uid ?>";
-    
-    // FIX FREEZE: request guard agar fetch tidak menumpuk ketika koneksi API/MQTT lambat.
+    const API_URL = "api.php"; // Jika api.php beda server/Azure, ganti menjadi: https://nama-app.azurewebsites.net/api.php
+    // REALTIME WEB: browser subscribe MQTT via WebSocket, jadi web update saat ada aktivitas baru.
+    const MQTT_WEB_URL = "wss://07ea93ea62a6450eb50b1cb6e520eae3.s1.eu.hivemq.cloud:8883/mqtt";
+    const MQTT_WEB_USER = "Rifki";
+    const MQTT_WEB_PASS = "Kitaaja123";
+
     const __activeRequests = {};
     async function guardedFetch(key, url, options = {}) {
         if (__activeRequests[key]) return null;
         __activeRequests[key] = true;
-
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 8000);
-
         try {
             return await fetch(url, { ...options, signal: controller.signal });
         } finally {
@@ -171,7 +174,7 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
             __activeRequests[key] = false;
         }
     }
-const API_URL = "api.php"; // Jika api.php beda server/Azure, ganti menjadi: https://nama-app.azurewebsites.net/api.php
+
 
     let userLiveInterval = null;
     let userSlotInterval = null;
@@ -274,6 +277,56 @@ const API_URL = "api.php"; // Jika api.php beda server/Azure, ganti menjadi: htt
         }
     }
 
+
+    function refreshDashboardFromActivity(reason = 'mqtt_activity') {
+        console.log('[WEB REALTIME REFRESH]', reason);
+        fetchUserLiveData();
+        fetchLiveSlots();
+        const modal = document.getElementById('modalTrx');
+        if (modal && modal.classList.contains('show')) fetchAndRenderLive();
+    }
+
+    function startMqttRealtimeUser() {
+        if (typeof mqtt === 'undefined') {
+            console.warn('[MQTT WEB] mqtt.js tidak termuat. Fallback polling tetap aktif.');
+            return;
+        }
+
+        const clientId = 'web_user_' + USER_ID.substring(0, 8) + '_' + Math.random().toString(16).slice(2);
+        const webClient = mqtt.connect(MQTT_WEB_URL, {
+            clientId,
+            username: MQTT_WEB_USER,
+            password: MQTT_WEB_PASS,
+            clean: true,
+            connectTimeout: 8000,
+            reconnectPeriod: 4000
+        });
+
+        webClient.on('connect', () => {
+            console.log('[MQTT WEB] Connected');
+            webClient.subscribe('smartparking/server/#', { qos: 0 });
+            refreshDashboardFromActivity('mqtt_connected');
+        });
+
+        webClient.on('message', (topic, buffer) => {
+            const msg = buffer.toString();
+            console.log('[MQTT WEB RECEIVE]', topic, msg);
+
+            if (
+                topic === 'smartparking/server/slot/state' ||
+                topic.startsWith('smartparking/server/reservation/') ||
+                topic.startsWith('smartparking/server/gate/') ||
+                topic.startsWith('smartparking/server/transaction/') ||
+                topic === 'smartparking/server/error'
+            ) {
+                refreshDashboardFromActivity(topic);
+            }
+        });
+
+        webClient.on('error', (err) => console.warn('[MQTT WEB ERROR]', err.message));
+        webClient.on('reconnect', () => console.log('[MQTT WEB] Reconnecting...'));
+    }
+
     function startDashboardPolling() {
         stopDashboardPolling();
 
@@ -281,8 +334,8 @@ const API_URL = "api.php"; // Jika api.php beda server/Azure, ganti menjadi: htt
         fetchLiveSlots();
         startUserLocalTimer();
 
-        userLiveInterval = setInterval(fetchUserLiveData, 10000);
-        userSlotInterval = setInterval(fetchLiveSlots, 10000);
+        userLiveInterval = setInterval(fetchUserLiveData, 30000); // fallback saja, realtime utama via MQTT WebSocket
+        userSlotInterval = setInterval(fetchLiveSlots, 30000); // fallback saja, realtime utama via MQTT WebSocket
     }
 
     function stopDashboardPolling() {
@@ -294,6 +347,7 @@ const API_URL = "api.php"; // Jika api.php beda server/Azure, ganti menjadi: htt
     }
 
     startDashboardPolling();
+    startMqttRealtimeUser();
 
     document.addEventListener("visibilitychange", () => {
         if (document.hidden) {
@@ -325,7 +379,7 @@ const API_URL = "api.php"; // Jika api.php beda server/Azure, ganti menjadi: htt
         fd.append('slot_nomor', nomor);
 
         try {
-            let res = await guardedFetch("book_slot", `${API_URL}?action=book_slot`, { method: \'POST\', body: fd }); if (!res) return;
+            let res = await guardedFetch("book_slot", `${API_URL}?action=book_slot`, { method: 'POST', body: fd }); if (!res) return;
             let data = await res.json();
 
             if (data.status === 'success' || data.status === 'accepted') {
