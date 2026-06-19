@@ -57,7 +57,7 @@ $uid = $_SESSION['user_id'];
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://unpkg.com/paho-mqtt@1.1.0/paho-mqtt-min.js"></script>
 <script src="mqtt_browser_config.php"></script>
-<script src="mqtt_realtime.js"></script>
+<script src="js/mqtt_realtime.js"></script>
 
 <script>
     const USER_ID = "<?= $uid ?>";
