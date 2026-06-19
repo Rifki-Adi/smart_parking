@@ -131,12 +131,27 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://unpkg.com/paho-mqtt@1.1.0/paho-mqtt-min.js"></script>
 <script src="mqtt_browser_config.php"></script>
-<script src="mqtt_realtime.js"></script>
+<script src="js/mqtt_realtime.js"></script>
 <script>
+    let adminSlotBusy = false;
+    let adminDashboardBusy = false;
+    let lastAdminSlotHash = '';
+    let lastAdminDashboardHash = '';
+
     async function fetchLiveAdminSlots() {
+        if (adminSlotBusy || document.hidden) return;
+        adminSlotBusy = true;
+
         try {
-            const res = await fetch(`api.php?action=get_slots_admin&_=${Date.now()}`);
+            const res = await fetch(`api.php?action=get_slots_admin&_=${Date.now()}`, { cache: 'no-store' });
             const data = await res.json();
+            const hash = JSON.stringify(data);
+
+            if (hash === lastAdminSlotHash) {
+                return;
+            }
+            lastAdminSlotHash = hash;
+
             document.getElementById('header-kapasitas').innerText = `Live Slot Monitor (Terisi: ${data.terpakai} / ${data.total})`;
             let htmlContainer = '';
             data.slots.forEach(slot => {
@@ -163,7 +178,11 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
                 htmlContainer += `<div class="col"><div id="slot-box-${slot.slot_nomor}" class="slot-card p-3 border rounded-4 text-center ${borderState}" style="min-height: 140px;">${innerHtml}</div></div>`;
             });
             document.getElementById('slot-area-container').innerHTML = htmlContainer;
-        } catch (e) {}
+        } catch (e) {
+            console.log('Gagal ambil slot admin:', e);
+        } finally {
+            adminSlotBusy = false;
+        }
     }
 
     let currentPage = 1; let currentSortCol = 'created_at'; let currentSortDir = 'desc';
@@ -184,12 +203,17 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
     function changePage(page) { currentPage = page; fetchDashboardData(); }
 
     async function fetchDashboardData() {
+        if (adminDashboardBusy || document.hidden) return;
+        adminDashboardBusy = true;
         let fTipe = document.getElementById('filter_tipe').value; 
         let fTglMulai = document.getElementById('filter_tgl_mulai').value;
         let fTglSelesai = document.getElementById('filter_tgl_selesai').value;
         try {
             const res = await fetch(`api.php?action=get_dashboard_data&p=${currentPage}&tipe=${fTipe}&tgl_mulai=${fTglMulai}&tgl_selesai=${fTglSelesai}&sort_col=${currentSortCol}&sort_dir=${currentSortDir}&_=${Date.now()}`);
             const data = await res.json();
+            const dataHash = JSON.stringify(data);
+            if (dataHash === lastAdminDashboardHash) { return; }
+            lastAdminDashboardHash = dataHash;
             document.getElementById('total_user_card').innerText = data.total_user; document.getElementById('total_saldo_card').innerText = 'Rp ' + data.total_saldo.toLocaleString('id-ID');
             
             let tbody = document.getElementById('trx_table_body'); let html = '';
@@ -222,10 +246,14 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
                 pHtml += `<li class="page-item ${data.current_page >= data.total_pages ? 'disabled' : ''}"><a class="page-link shadow-sm border-0 rounded" href="#" onclick="changePage(${data.current_page + 1}); return false;">Next &raquo;</a></li></ul>`;
                 pagContainer.innerHTML = pHtml;
             } else { pagContainer.innerHTML = ''; }
-        } catch (e) {}
+        } catch (e) {
+            console.log('Gagal ambil dashboard admin:', e);
+        } finally {
+            adminDashboardBusy = false;
+        }
     }
 
-    // --- POLLING ADMIN + TIMER LOKAL 1 DETIK ---
+    // --- REALTIME ADMIN + TIMER LOKAL 1 DETIK ---
     let intervalAdminSlots = null;
     let intervalDashboard = null;
     let intervalAdminTimer = null;
@@ -252,9 +280,20 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
         });
     }
 
-    function refreshAdminRealtime(reason = '') {
+    function refreshAdminRealtime(eventName = '', payload = null) {
         fetchLiveAdminSlots();
-        fetchDashboardData();
+
+        const dashboardEvents = [
+            'reservation_created', 'reservation_cancelled', 'reservation_expired',
+            'gate_checkin', 'gate_checkout', 'gate_checkin_permanent',
+            'gate_checkout_permanent', 'gate_checkout_sticker', 'topup_success',
+            'user_deleted', 'gate_scan_processed'
+        ];
+
+        // Data tabel transaksi/admin tidak perlu diambil ulang untuk event sensor slot biasa.
+        if (!eventName || dashboardEvents.includes(eventName)) {
+            fetchDashboardData();
+        }
     }
 
     function startAdminRealtime() {
