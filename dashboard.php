@@ -154,7 +154,7 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://unpkg.com/paho-mqtt@1.1.0/paho-mqtt-min.js"></script>
 <script src="mqtt_browser_config.php"></script>
-<script src="mqtt_realtime.js"></script>
+<script src="js/mqtt_realtime.js"></script>
 
 <script>
     const USER_ID = "<?= $uid ?>";
@@ -163,6 +163,10 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
     let userSlotInterval = null;
     let userTimerInterval = null;
     let userTimeLeft = 0;
+    let userLiveBusy = false;
+    let userSlotBusy = false;
+    let lastUserLiveHash = '';
+    let lastUserSlotHash = '';
 
     function formatCountdown(seconds) {
         seconds = Math.max(0, parseInt(seconds || 0));
@@ -198,24 +202,45 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
     }
 
     async function fetchUserLiveData() {
+        if (userLiveBusy || document.hidden) return;
+        userLiveBusy = true;
+
         try {
-            let res = await fetch(`api.php?action=get_user_live_data&uid=${USER_ID}&_=${Date.now()}`);
+            let res = await fetch(`api.php?action=get_user_live_data&uid=${USER_ID}&_=${Date.now()}`, { cache: 'no-store' });
             let data = await res.json();
+            let hash = JSON.stringify(data);
 
-            let elSaldo = document.getElementById('teks-saldo');
-            if(elSaldo) {
-                elSaldo.innerText = 'Rp ' + data.saldo.toLocaleString('id-ID');
+            if (hash !== lastUserLiveHash) {
+                lastUserLiveHash = hash;
+
+                let elSaldo = document.getElementById('teks-saldo');
+                if (elSaldo && typeof data.saldo !== 'undefined') {
+                    elSaldo.innerText = 'Rp ' + parseInt(data.saldo || 0).toLocaleString('id-ID');
+                }
+
+                userTimeLeft = parseInt(data.time_left || 0);
+                updateUserCountdownDisplay();
             }
-
-            userTimeLeft = parseInt(data.time_left || 0);
-            updateUserCountdownDisplay();
-        } catch (e) {}
+        } catch (e) {
+            console.log('Gagal ambil live user:', e);
+        } finally {
+            userLiveBusy = false;
+        }
     }
 
     async function fetchLiveSlots() {
+        if (userSlotBusy || document.hidden) return;
+        userSlotBusy = true;
+
         try {
-            const response = await fetch(`api.php?action=get_slots&uid=${USER_ID}&_=${Date.now()}`);
+            const response = await fetch(`api.php?action=get_slots&uid=${USER_ID}&_=${Date.now()}`, { cache: 'no-store' });
             const slots = await response.json();
+            const hash = JSON.stringify(slots);
+
+            if (hash === lastUserSlotHash) {
+                return;
+            }
+            lastUserSlotHash = hash;
             
             let htmlContainer = '';
 
@@ -243,16 +268,31 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
                 htmlContainer += `<div class="col"><div id="slot-box-${slot.slot_nomor}" class="slot-card p-3 border rounded-4 text-center ${cls}"><i class="fas fa-car fa-2x mb-2"></i><h6 class="fw-bold mb-0">Slot ${slot.slot_nomor}</h6><div id="slot-btn-${slot.slot_nomor}">${btn_html}</div></div></div>`;
             });
 
-            document.getElementById('slot-area-container').innerHTML = htmlContainer;
-        } catch (e) {}
+            const slotArea = document.getElementById('slot-area-container');
+            if (slotArea) slotArea.innerHTML = htmlContainer;
+        } catch (e) {
+            console.log('Gagal ambil slot:', e);
+        } finally {
+            userSlotBusy = false;
+        }
     }
 
-    function refreshDashboardRealtime(reason = '') {
-        fetchUserLiveData();
+    function refreshDashboardRealtime(eventName = '', payload = null) {
         fetchLiveSlots();
 
+        const userDataEvents = [
+            'reservation_created', 'reservation_cancelled', 'reservation_expired',
+            'gate_checkin', 'gate_checkout', 'gate_checkin_permanent',
+            'gate_checkout_permanent', 'gate_checkout_sticker', 'topup_success',
+            'gate_scan_processed', 'slot_state_requested'
+        ];
+
+        if (!eventName || userDataEvents.includes(eventName)) {
+            fetchUserLiveData();
+        }
+
         const modalTrx = document.getElementById('modalTrx');
-        if (modalTrx && modalTrx.classList.contains('show')) {
+        if (modalTrx && modalTrx.classList.contains('show') && userDataEvents.includes(eventName)) {
             fetchAndRenderLive();
         }
     }
