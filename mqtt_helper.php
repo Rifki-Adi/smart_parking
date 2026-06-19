@@ -1,12 +1,23 @@
 <?php
 // =====================================================
-// HELPER MQTT UNTUK API / WEBSITE
+// HELPER MQTT UNTUK API / WEBSITE - OPTIMAL & FAIL FAST
 // =====================================================
 // File ini dipakai oleh api.php, cleanup.php, topup.php, dll.
-// Jika vendor/autoload.php belum ada, fungsi akan return false
+// Jika vendor/autoload.php atau mqtt_config.php belum ada, fungsi return false
 // agar halaman tetap berjalan dan tidak fatal error.
 
-require_once __DIR__ . '/mqtt_config.php';
+if (file_exists(__DIR__ . '/mqtt_config.php')) {
+    require_once __DIR__ . '/mqtt_config.php';
+}
+
+if (!defined('MQTT_TOPIC_SERVER_EVENT'))  define('MQTT_TOPIC_SERVER_EVENT', 'smartparking/server/event');
+if (!defined('MQTT_TOPIC_SLOT_STATE'))    define('MQTT_TOPIC_SLOT_STATE', 'smartparking/server/slot/state');
+if (!defined('MQTT_USE_TLS'))             define('MQTT_USE_TLS', true);
+
+function smartparking_mqtt_config_ready(): bool
+{
+    return defined('MQTT_HOST') && defined('MQTT_PORT') && defined('MQTT_USER') && defined('MQTT_PASS');
+}
 
 function smartparking_mqtt_autoload_ready(): bool
 {
@@ -19,20 +30,26 @@ function smartparking_mqtt_autoload_ready(): bool
     return class_exists('PhpMqtt\\Client\\MqttClient');
 }
 
+function smartparking_json(array $payload): string
+{
+    return json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+}
+
 function smartparking_mqtt_publish(string $topic, array $payload, int $qos = 0, bool $retain = false): bool
 {
-    if (!smartparking_mqtt_autoload_ready()) {
+    if (!smartparking_mqtt_config_ready() || !smartparking_mqtt_autoload_ready()) {
         return false;
     }
 
     try {
         $clientId = 'php_web_' . uniqid('', true);
 
+        // Fail fast agar request API tidak terasa lambat ketika MQTT sedang bermasalah.
         $settings = (new \PhpMqtt\Client\ConnectionSettings())
             ->setUsername(MQTT_USER)
             ->setPassword(MQTT_PASS)
-            ->setKeepAliveInterval(30)
-            ->setConnectTimeout(5);
+            ->setKeepAliveInterval(10)
+            ->setConnectTimeout(2);
 
         if (defined('MQTT_USE_TLS') && MQTT_USE_TLS) {
             $settings->setUseTls(true);
@@ -46,11 +63,12 @@ function smartparking_mqtt_publish(string $topic, array $payload, int $qos = 0, 
         );
 
         $mqtt->connect($settings, true);
-        $mqtt->publish($topic, json_encode($payload, JSON_UNESCAPED_UNICODE), $qos, $retain);
+        $mqtt->publish($topic, smartparking_json($payload), $qos, $retain);
         $mqtt->disconnect();
 
         return true;
     } catch (Throwable $e) {
+        // Jangan menampilkan password/credential ke browser.
         return false;
     }
 }
@@ -73,7 +91,12 @@ function smartparking_get_slot_state_payload(PDO $conn, string $source = 'api.ph
     $slots = $conn->query("SELECT * FROM slot ORDER BY slot_nomor ASC LIMIT 4")
         ->fetchAll(PDO::FETCH_ASSOC);
 
-    $stmt = $conn->prepare("\n        SELECT slot_id, status, kode_booking, created_at\n        FROM reservasi\n        WHERE status = 'check-in'\n           OR (status = 'pending' AND created_at >= ?)\n    ");
+    $stmt = $conn->prepare("
+        SELECT slot_id, status, kode_booking, created_at
+        FROM reservasi
+        WHERE status = 'check-in'
+           OR (status = 'pending' AND created_at >= ?)
+    ");
     $stmt->execute([$expiredAt]);
     $reservasiAktif = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -99,8 +122,7 @@ function smartparking_get_slot_state_payload(PDO $conn, string $source = 'api.ph
             if ($reservasiStatus === 'pending') {
                 $status = 'reserved';
             } elseif ($reservasiStatus === 'check-in') {
-                // Kalau parkir langsung PL- dan sensor tidak membaca mobil, dianggap kosong.
-                // Selain itu tetap ditandai reserved agar LED kuning dan sistem tidak double booking.
+                // Untuk parkir langsung PL-/permanen, sensor fisik tetap penentu slot terisi.
                 $status = (strpos((string)$kodeBooking, 'PL-') === 0) ? 'kosong' : 'reserved';
             }
         }
@@ -131,7 +153,10 @@ function smartparking_publish_slot_state(PDO $conn, string $source = 'api.php'):
 
 function smartparking_publish_refresh(PDO $conn, string $event, string $source = 'api.php', array $extra = []): void
 {
-    smartparking_publish_slot_state($conn, $source);
+    // Event dikirim dulu agar dashboard segera fetch data baru.
     smartparking_publish_event($event, $source, $extra);
+
+    // Slot state tetap dipublish untuk ESP32/browser, tapi jika MQTT gagal API tetap lanjut.
+    smartparking_publish_slot_state($conn, $source);
 }
 ?>
