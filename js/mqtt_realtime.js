@@ -1,5 +1,5 @@
 // =====================================================
-// MQTT REALTIME CLIENT UNTUK DASHBOARD WEBSITE
+// MQTT REALTIME CLIENT UNTUK DASHBOARD WEBSITE - OPTIMAL
 // =====================================================
 // Membutuhkan:
 // 1. Paho MQTT JS
@@ -9,18 +9,53 @@
     let mqttClient = null;
     let reconnectTimer = null;
     let refreshTimer = null;
+    let reconnectDelay = 2000;
+    let lastRefreshAt = 0;
+    let lastEventKey = '';
 
-    function hasConfig() {
-        return typeof window.SMARTPARKING_MQTT !== 'undefined';
+    const DEBUG_MQTT = false;
+    const MIN_REFRESH_GAP_MS = 700;
+    const DEBOUNCE_MS = 350;
+
+    function log() {
+        if (DEBUG_MQTT) console.log.apply(console, arguments);
     }
 
-    function debounceRefresh(reason) {
-        clearTimeout(refreshTimer);
-        refreshTimer = setTimeout(() => {
+    function hasConfig() {
+        return typeof window.SMARTPARKING_MQTT === 'object' && window.SMARTPARKING_MQTT !== null;
+    }
+
+    function getEventName(topic, payload) {
+        if (payload && payload.event) return String(payload.event);
+        return String(topic || 'mqtt_event');
+    }
+
+    function debounceRefresh(eventName, payload) {
+        if (document.hidden) return;
+
+        const now = Date.now();
+        const eventKey = eventName + '|' + JSON.stringify(payload || {}).slice(0, 300);
+
+        // Abaikan event identik yang datang sangat berdekatan.
+        if (eventKey === lastEventKey && (now - lastRefreshAt) < 1200) {
+            return;
+        }
+
+        const runRefresh = function () {
+            lastRefreshAt = Date.now();
+            lastEventKey = eventKey;
             if (typeof window.smartParkingRealtimeRefresh === 'function') {
-                window.smartParkingRealtimeRefresh(reason || 'mqtt_event');
+                window.smartParkingRealtimeRefresh(eventName || 'mqtt_event', payload || null);
             }
-        }, 150);
+        };
+
+        clearTimeout(refreshTimer);
+
+        if ((now - lastRefreshAt) >= MIN_REFRESH_GAP_MS) {
+            refreshTimer = setTimeout(runRefresh, DEBOUNCE_MS);
+        } else {
+            refreshTimer = setTimeout(runRefresh, MIN_REFRESH_GAP_MS);
+        }
     }
 
     window.smartParkingStartMqttRealtime = function smartParkingStartMqttRealtime() {
@@ -39,16 +74,24 @@
         mqttClient = new Paho.MQTT.Client(cfg.host, Number(cfg.port), cfg.path || '/mqtt', clientId);
 
         mqttClient.onConnectionLost = function (responseObject) {
-            console.log('[MQTT WEB] Koneksi terputus:', responseObject.errorMessage || responseObject.errorCode);
+            log('[MQTT WEB] Koneksi terputus:', responseObject.errorMessage || responseObject.errorCode);
             clearTimeout(reconnectTimer);
-            reconnectTimer = setTimeout(window.smartParkingStartMqttRealtime, 3000);
+            reconnectTimer = setTimeout(window.smartParkingStartMqttRealtime, reconnectDelay);
+            reconnectDelay = Math.min(reconnectDelay + 1000, 10000);
         };
 
         mqttClient.onMessageArrived = function (message) {
-            console.log('[MQTT WEB] Topic:', message.destinationName, 'Payload:', message.payloadString);
+            let payload = null;
+            try {
+                payload = JSON.parse(message.payloadString || '{}');
+            } catch (e) {
+                payload = null;
+            }
+
+            log('[MQTT WEB] Topic:', message.destinationName, 'Payload:', payload || message.payloadString);
 
             if (message.destinationName === cfg.topicEvent || message.destinationName === cfg.topicSlotState) {
-                debounceRefresh(message.destinationName);
+                debounceRefresh(getEventName(message.destinationName, payload), payload);
             }
         };
 
@@ -60,20 +103,23 @@
             keepAliveInterval: 30,
             timeout: 5,
             onSuccess: function () {
-                console.log('[MQTT WEB] Terhubung ke HiveMQ WebSocket');
+                reconnectDelay = 2000;
+                log('[MQTT WEB] Terhubung ke HiveMQ WebSocket');
                 mqttClient.subscribe(cfg.topicEvent, { qos: 0 });
                 mqttClient.subscribe(cfg.topicSlotState, { qos: 0 });
             },
             onFailure: function (err) {
-                console.log('[MQTT WEB] Gagal konek:', err.errorMessage || err.errorCode);
+                log('[MQTT WEB] Gagal konek:', err.errorMessage || err.errorCode);
                 clearTimeout(reconnectTimer);
-                reconnectTimer = setTimeout(window.smartParkingStartMqttRealtime, 3000);
+                reconnectTimer = setTimeout(window.smartParkingStartMqttRealtime, reconnectDelay);
+                reconnectDelay = Math.min(reconnectDelay + 1000, 10000);
             }
         });
     };
 
     window.smartParkingStopMqttRealtime = function smartParkingStopMqttRealtime() {
         clearTimeout(reconnectTimer);
+        clearTimeout(refreshTimer);
         if (mqttClient && mqttClient.isConnected && mqttClient.isConnected()) {
             mqttClient.disconnect();
         }
