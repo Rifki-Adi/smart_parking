@@ -1,15 +1,32 @@
 #include <ESP32Servo.h>
 #include <WiFi.h>
-#include <HTTPClient.h>
+#include <WiFiClientSecure.h>
+#include <PubSubClient.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 
-const char* WIFI_SSID  = "DR";
-const char* WIFI_PASS  = "zidan1804";
+// ========================================================================================
+// 1. KONFIGURASI WIFI DAN MQTT
+// ========================================================================================
+const char* WIFI_SSID = "DR";
+const char* WIFI_PASS = "kitaaja123";
 
-const char* SERVER_URL =
-"https://smart-parking-rifki-eqfwfbghh3edbyd7.eastasia-01.azurewebsites.net/api.php";
+// Isi host HiveMQ tanpa mqtts://
+// Contoh: xxxxxxxx.s1.eu.hivemq.cloud
+const char* MQTT_SERVER = "07ea93ea62a6450eb50b1cb6e520eae3.s1.eu.hivemq.cloud";
+const int   MQTT_PORT   = 8883;
+const char* MQTT_USER   = "smart_parking";
+const char* MQTT_PASS   = "Smartparking2026";
 
+const char* TOPIC_SLOT_STATUS       = "smartparking/slot/status";
+const char* TOPIC_GATE_SCAN         = "smartparking/gate/scan";
+const char* TOPIC_GATE_RESPONSE     = "smartparking/gate/response";
+const char* TOPIC_SERVER_SLOT_STATE = "smartparking/server/slot/state";
+const char* TOPIC_SLOT_REQUEST      = "smartparking/slot/request";
+
+// ========================================================================================
+// 2. KONFIGURASI PIN
+// ========================================================================================
 #define GM65_IN_RX   16
 #define GM65_IN_TX   17
 #define GM65_OUT_RX  25
@@ -24,19 +41,25 @@ const char* SERVER_URL =
 #define IR_SLOT_3  32
 #define IR_SLOT_4  33
 
-#define SR_DATA    23
-#define SR_CLOCK   18
-#define SR_LATCH    5
+#define SR_DATA   23
+#define SR_CLOCK  18
+#define SR_LATCH   5
 
-#define TOTAL_SLOT     4
-#define SERVO_BUKA_MS  5000
-#define IR_CHECK_MS    200
-#define SLOT_SYNC_MS   15000
-#define HARDWARE_SEND_COOLDOWN 1000
+// ========================================================================================
+// 3. KONFIGURASI SISTEM
+// ========================================================================================
+#define TOTAL_SLOT              4
+#define SERVO_BUKA_MS           5000
+#define IR_CHECK_MS             200
+#define SLOT_SYNC_MS            15000
+#define HARDWARE_SEND_COOLDOWN  1000
 
-#define SERVO_TUTUP    90
-#define SERVO_BUKA     0
+#define SERVO_TUTUP  90
+#define SERVO_BUKA    0
 
+// ========================================================================================
+// 4. OBJECT DAN VARIABEL GLOBAL
+// ========================================================================================
 HardwareSerial ScannerMasuk(2);
 HardwareSerial ScannerKeluar(1);
 
@@ -45,7 +68,11 @@ Servo servoKeluar;
 
 LiquidCrystal_I2C lcd(0x27, 20, 4);
 
-int statusSlot[TOTAL_SLOT] = {0,0,0,0};
+WiFiClientSecure secureClient;
+PubSubClient mqtt(secureClient);
+
+int statusSlot[TOTAL_SLOT] = {0, 0, 0, 0};
+int lastPhysicalState[TOTAL_SLOT] = {-1, -1, -1, -1};
 
 int irPin[TOTAL_SLOT] = {
   IR_SLOT_1,
@@ -54,46 +81,51 @@ int irPin[TOTAL_SLOT] = {
   IR_SLOT_4
 };
 
-int lastPhysicalState[TOTAL_SLOT] = {-1,-1,-1,-1};
-
 String bufferMasuk  = "";
 String bufferKeluar = "";
 
 bool servoMasukAktif  = false;
 bool servoKeluarAktif = false;
+bool isLcdShowingMsg  = false;
+bool wifiConnected    = false;
 
-unsigned long timerMasuk  = 0;
-unsigned long timerKeluar = 0;
+unsigned long timerMasuk          = 0;
+unsigned long timerKeluar         = 0;
+unsigned long lastIRCheck         = 0;
+unsigned long lastSlotSync        = 0;
+unsigned long lastHardwareSend    = 0;
+unsigned long lcdMessageTimer     = 0;
+unsigned long lastLcdIdleUpdate   = 0;
 
-unsigned long lastIRCheck  = 0;
-unsigned long lastSlotSync = 0;
-unsigned long lastHardwareSend = 0;
+// Variabel untuk menunggu respons validasi QR dari MQTT
+bool waitingGateResponse = false;
+String pendingQr         = "";
+String pendingGate       = "";
+String lastGateResult    = "";
+unsigned long gateRequestTimer = 0;
 
-unsigned long lcdMessageTimer   = 0;
-unsigned long lastLcdIdleUpdate = 0;
-
-bool isLcdShowingMsg = false;
-bool wifiConnected   = false;
-
-String fitLine(String text){
-  if(text.length() > 20){
+// ========================================================================================
+// 5. FUNGSI BANTUAN LCD DAN STRING
+// ========================================================================================
+String fitLine(String text) {
+  if (text.length() > 20) {
     return text.substring(0, 20);
   }
 
-  while(text.length() < 20){
+  while (text.length() < 20) {
     text += " ";
   }
 
   return text;
 }
 
-void printCenter(int row, String text){
-  if(text.length() > 20){
+void printCenter(int row, String text) {
+  if (text.length() > 20) {
     text = text.substring(0, 20);
   }
 
   int pad = (20 - text.length()) / 2;
-  if(pad < 0) pad = 0;
+  if (pad < 0) pad = 0;
 
   lcd.setCursor(0, row);
   lcd.print("                    ");
@@ -102,9 +134,8 @@ void printCenter(int row, String text){
   lcd.print(text);
 }
 
-void showLcdMessage(String baris1, String baris2, String baris3, String baris4){
+void showLcdMessage(String baris1, String baris2, String baris3, String baris4) {
   lcd.clear();
-
   printCenter(0, baris1);
   printCenter(1, baris2);
   printCenter(2, baris3);
@@ -114,68 +145,93 @@ void showLcdMessage(String baris1, String baris2, String baris3, String baris4){
   lcdMessageTimer = millis();
 }
 
-void updateLcdIdle(){
+String escapeJson(String value) {
+  value.replace("\\", "\\\\");
+  value.replace("\"", "\\\"");
+  value.replace("\n", "");
+  value.replace("\r", "");
+  return value;
+}
 
-  if(isLcdShowingMsg) return;
+String extractJsonValue(String payload, String key) {
+  String pattern = "\"" + key + "\":\"";
+  int idx = payload.indexOf(pattern);
+
+  if (idx == -1) return "";
+
+  int start = idx + pattern.length();
+  int end = payload.indexOf("\"", start);
+
+  if (end == -1) return "";
+
+  return payload.substring(start, end);
+}
+
+// ========================================================================================
+// 6. LCD IDLE DAN LED STATUS SLOT
+// ========================================================================================
+void updateLcdIdle() {
+  if (isLcdShowingMsg) return;
 
   int sisaSlot = 0;
 
-  for(int i = 0; i < TOTAL_SLOT; i++){
-    if(statusSlot[i] == 0){
+  for (int i = 0; i < TOTAL_SLOT; i++) {
+    if (statusSlot[i] == 0) {
       sisaSlot++;
     }
   }
 
-  lcd.setCursor(0,0);
+  lcd.setCursor(0, 0);
   lcd.print(fitLine("=== SMART PARKING ==="));
 
-  lcd.setCursor(0,1);
+  lcd.setCursor(0, 1);
   lcd.print(fitLine("Slot Tersedia: " + String(sisaSlot)));
 
-  lcd.setCursor(0,2);
+  lcd.setCursor(0, 2);
   lcd.print(fitLine("Scan QR"));
 
   String line4 = "";
 
-  for(int i = 0; i < TOTAL_SLOT; i++){
+  for (int i = 0; i < TOTAL_SLOT; i++) {
     line4 += "S";
     line4 += String(i + 1);
     line4 += ":";
 
-    if(statusSlot[i] == 1){
-      line4 += "I ";
-    }
-    else if(statusSlot[i] == 2){
-      line4 += "R ";
-    }
-    else{
-      line4 += "K ";
+    if (statusSlot[i] == 1) {
+      line4 += "I ";       // I = Isi / Terisi
+    } else if (statusSlot[i] == 2) {
+      line4 += "R ";       // R = Reserved
+    } else {
+      line4 += "K ";       // K = Kosong
     }
   }
 
-  lcd.setCursor(0,3);
+  lcd.setCursor(0, 3);
   lcd.print(fitLine(line4));
 }
 
-void updateTrafficLight(){
-
+void updateTrafficLight() {
   byte ic1 = 0;
   byte ic2 = 0;
 
-  if(statusSlot[0] == 1) ic1 |= 0b00000001;
-  else if(statusSlot[0] == 2) ic1 |= 0b00000010;
+  // Slot 1
+  if (statusSlot[0] == 1) ic1 |= 0b00000001;
+  else if (statusSlot[0] == 2) ic1 |= 0b00000010;
   else ic1 |= 0b00000100;
 
-  if(statusSlot[1] == 1) ic1 |= 0b00001000;
-  else if(statusSlot[1] == 2) ic1 |= 0b00010000;
+  // Slot 2
+  if (statusSlot[1] == 1) ic1 |= 0b00001000;
+  else if (statusSlot[1] == 2) ic1 |= 0b00010000;
   else ic1 |= 0b00100000;
 
-  if(statusSlot[2] == 1) ic2 |= 0b00000001;
-  else if(statusSlot[2] == 2) ic2 |= 0b00000010;
+  // Slot 3
+  if (statusSlot[2] == 1) ic2 |= 0b00000001;
+  else if (statusSlot[2] == 2) ic2 |= 0b00000010;
   else ic2 |= 0b00000100;
 
-  if(statusSlot[3] == 1) ic2 |= 0b00001000;
-  else if(statusSlot[3] == 2) ic2 |= 0b00010000;
+  // Slot 4
+  if (statusSlot[3] == 1) ic2 |= 0b00001000;
+  else if (statusSlot[3] == 2) ic2 |= 0b00010000;
   else ic2 |= 0b00100000;
 
   digitalWrite(SR_LATCH, LOW);
@@ -184,77 +240,67 @@ void updateTrafficLight(){
   digitalWrite(SR_LATCH, HIGH);
 }
 
-void sendSlotStatusToServer(){
+// ========================================================================================
+// 7. PARSE STATUS SLOT DARI SERVER VIA MQTT
+// ========================================================================================
+void parseServerSlotState(String payload) {
+  bool statusBerubah = false;
 
-  if(!wifiConnected) return;
+  for (int i = 0; i < TOTAL_SLOT; i++) {
+    String searchStr1 = "\"slot_nomor\":" + String(i + 1);
+    String searchStr2 = "\"slot_nomor\":\"" + String(i + 1) + "\"";
 
-  HTTPClient http;
+    int slotIdx = payload.indexOf(searchStr1);
 
-  String url = String(SERVER_URL) + "?action=update_hardware_slots";
-
-  url += "&s1=" + String(lastPhysicalState[0]);
-  url += "&s2=" + String(lastPhysicalState[1]);
-  url += "&s3=" + String(lastPhysicalState[2]);
-  url += "&s4=" + String(lastPhysicalState[3]);
-
-  http.begin(url);
-  http.addHeader("Connection", "close");
-  http.setTimeout(5000);
-
-  int code = http.GET();
-
-  if(code == 200){
-    Serial.println("[HW SYNC] OK");
-  } else {
-    Serial.print("[HW SYNC ERROR] ");
-    Serial.println(code);
-  }
-
-  http.end();
-}
-
-void updateIRSensor(){
-
-  bool hardwareChanged = false;
-
-  for(int i = 0; i < TOTAL_SLOT; i++){
-
-    bool terisi = digitalRead(irPin[i]) == LOW;
-    int currentState = terisi ? 1 : 0;
-
-    if(currentState != lastPhysicalState[i]){
-      hardwareChanged = true;
-      lastPhysicalState[i] = currentState;
+    if (slotIdx == -1) {
+      slotIdx = payload.indexOf(searchStr2);
     }
 
-    if(terisi){
+    if (slotIdx == -1) {
+      continue;
+    }
+
+    int objEnd = payload.indexOf("}", slotIdx);
+
+    if (objEnd == -1) {
+      objEnd = payload.length() - 1;
+    }
+
+    String oneSlot = payload.substring(slotIdx, objEnd);
+    bool terisiServer = oneSlot.indexOf("\"terisi\":true") != -1;
+    String state = extractJsonValue(oneSlot, "status");
+
+    int oldStatus = statusSlot[i];
+
+    // Prioritas status fisik jika sensor membaca terisi.
+    if (digitalRead(irPin[i]) == LOW || terisiServer) {
       statusSlot[i] = 1;
     } else {
-      if(statusSlot[i] != 2){
+      if (state.indexOf("reserved") != -1 || state.indexOf("reservasi") != -1) {
+        statusSlot[i] = 2;
+      } else {
         statusSlot[i] = 0;
       }
     }
+
+    if (oldStatus != statusSlot[i]) {
+      statusBerubah = true;
+    }
   }
 
-  if(hardwareChanged){
+  if (statusBerubah) {
+    updateTrafficLight();
 
-    if(millis() - lastHardwareSend >= HARDWARE_SEND_COOLDOWN){
-
-      lastHardwareSend = millis();
-
-      Serial.println("[HW SYNC] SENSOR BERUBAH");
-
-      sendSlotStatusToServer();
-
-      if(!isLcdShowingMsg){
-        updateLcdIdle();
-      }
+    if (!isLcdShowingMsg) {
+      updateLcdIdle();
     }
   }
 }
 
-void connectWiFi(){
-
+// ========================================================================================
+// 8. KONEKSI WIFI DAN MQTT
+// ========================================================================================
+void connectWiFi() {
   lcd.clear();
   printCenter(1, "Menghubungkan WiFi");
   printCenter(2, WIFI_SSID);
@@ -266,24 +312,25 @@ void connectWiFi(){
 
   int attempt = 0;
 
-  while(WiFi.status() != WL_CONNECTED && attempt < 20){
+  while (WiFi.status() != WL_CONNECTED && attempt < 20) {
     delay(500);
     Serial.print(".");
     attempt++;
   }
 
-  if(WiFi.status() == WL_CONNECTED){
-
+  if (WiFi.status() == WL_CONNECTED) {
     wifiConnected = true;
+
     Serial.println("\n[WiFi] Connected");
+    Serial.print("[WiFi] IP: ");
+    Serial.println(WiFi.localIP());
 
     lcd.clear();
     printCenter(1, "WiFi Terhubung");
     printCenter(2, "Sistem Siap");
-
   } else {
-
     wifiConnected = false;
+
     Serial.println("\n[WiFi] Failed");
 
     lcd.clear();
@@ -295,270 +342,307 @@ void connectWiFi(){
   lcd.clear();
 }
 
-void syncSlotDariServer(){
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  String topicStr = String(topic);
+  String message = "";
 
-  if(!wifiConnected) return;
-
-  HTTPClient http;
-
-  String url = String(SERVER_URL) + "?action=get_slots&uid=esp32_device";
-
-  http.begin(url);
-  http.addHeader("Connection", "close");
-  http.setTimeout(5000);
-
-  int code = http.GET();
-
-  bool statusBerubah = false;
-
-  if(code == 200){
-
-    String payload = http.getString();
-
-    for(int i = 0; i < TOTAL_SLOT; i++){
-
-      String searchStr1 = "\"slot_nomor\":\"" + String(i+1) + "\"";
-      String searchStr2 = "\"slot_nomor\":" + String(i+1);
-
-      int slotIdx = payload.indexOf(searchStr1);
-
-      if(slotIdx == -1){
-        slotIdx = payload.indexOf(searchStr2);
-      }
-
-      if(slotIdx != -1){
-
-        int stateIdx = payload.indexOf("\"state\":\"", slotIdx);
-
-        if(stateIdx != -1){
-
-          int valStart = stateIdx + 9;
-          int valEnd = payload.indexOf("\"", valStart);
-
-          String state = payload.substring(valStart, valEnd);
-
-          if(digitalRead(irPin[i]) != LOW){
-
-            int oldStatus = statusSlot[i];
-
-            if(state.indexOf("reserved") != -1){
-              statusSlot[i] = 2;
-            } else {
-              statusSlot[i] = 0;
-            }
-
-            if(oldStatus != statusSlot[i]){
-              statusBerubah = true;
-            }
-          }
-        }
-      }
-    }
-
-    updateTrafficLight();
-
-    if(statusBerubah && !isLcdShowingMsg){
-      updateLcdIdle();
-    }
-
-  } else {
-    Serial.print("[SYNC ERROR] ");
-    Serial.println(code);
+  for (unsigned int i = 0; i < length; i++) {
+    message += (char)payload[i];
   }
 
-  http.end();
+  Serial.print("[MQTT IN] Topic: ");
+  Serial.println(topicStr);
+  Serial.print("[MQTT IN] Message: ");
+  Serial.println(message);
+
+  // Respons validasi QR dari bridge/server.
+  if (topicStr == TOPIC_GATE_RESPONSE) {
+    String qrCode = extractJsonValue(message, "qr_code");
+    String gate   = extractJsonValue(message, "gate");
+    String status = extractJsonValue(message, "status");
+    String pesan  = extractJsonValue(message, "message");
+
+    if (pesan.length() == 0) {
+      pesan = "Terjadi Kesalahan";
+    }
+
+    bool matchQr   = (qrCode.length() == 0 || qrCode == pendingQr);
+    bool matchGate = (gate.length() == 0 || gate == pendingGate);
+
+    if (waitingGateResponse && matchQr && matchGate) {
+      if (status == "success") {
+        lastGateResult = "success|" + pesan;
+      } else {
+        lastGateResult = "denied|" + pesan;
+      }
+
+      waitingGateResponse = false;
+    }
+  }
+
+  // Status slot dari server/bridge. Bagian ini opsional.
+  if (topicStr == TOPIC_SERVER_SLOT_STATE) {
+    parseServerSlotState(message);
+  }
 }
 
-String kirimQRkeServer(String qr, String gate){
+void connectMQTT() {
+  if (!wifiConnected) return;
 
-  if(!wifiConnected){
+  int attempt = 0;
+
+  while (!mqtt.connected() && attempt < 5) {
+    Serial.print("[MQTT] Menghubungkan ke HiveMQ... ");
+
+    String clientId = "ESP32-SmartParking-";
+    clientId += String((uint32_t)ESP.getEfuseMac(), HEX);
+    clientId += "-";
+    clientId += String(random(0xffff), HEX);
+
+    if (mqtt.connect(clientId.c_str(), MQTT_USER, MQTT_PASS)) {
+      Serial.println("berhasil");
+
+      mqtt.subscribe(TOPIC_GATE_RESPONSE);
+      mqtt.subscribe(TOPIC_SERVER_SLOT_STATE);
+
+      mqtt.publish(
+        "smartparking/test",
+        "{\"status\":\"berhasil\",\"message\":\"ESP32 terhubung ke HiveMQ\"}"
+      );
+
+      Serial.println("[MQTT] Subscribe berhasil");
+    } else {
+      Serial.print("gagal, rc=");
+      Serial.println(mqtt.state());
+
+      attempt++;
+      delay(2000);
+    }
+  }
+}
+
+// ========================================================================================
+// 9. SENSOR IR DAN PUBLISH STATUS SLOT
+// ========================================================================================
+void sendSlotStatusToMQTT() {
+  if (!wifiConnected) return;
+
+  if (!mqtt.connected()) {
+    connectMQTT();
+  }
+
+  if (!mqtt.connected()) {
+    Serial.println("[MQTT SLOT] Gagal, MQTT belum terkoneksi");
+    return;
+  }
+
+  String payload = "{";
+  payload += "\"s1\":" + String(lastPhysicalState[0]) + ",";
+  payload += "\"s2\":" + String(lastPhysicalState[1]) + ",";
+  payload += "\"s3\":" + String(lastPhysicalState[2]) + ",";
+  payload += "\"s4\":" + String(lastPhysicalState[3]);
+  payload += "}";
+
+  bool ok = mqtt.publish(TOPIC_SLOT_STATUS, payload.c_str());
+
+  if (ok) {
+    Serial.print("[MQTT SLOT] Publish OK: ");
+    Serial.println(payload);
+  } else {
+    Serial.print("[MQTT SLOT] Publish Gagal: ");
+    Serial.println(payload);
+  }
+}
+
+void updateIRSensor() {
+  bool hardwareChanged = false;
+
+  for (int i = 0; i < TOTAL_SLOT; i++) {
+    bool terisi = digitalRead(irPin[i]) == LOW;
+    int currentState = terisi ? 1 : 0;
+
+    if (currentState != lastPhysicalState[i]) {
+      hardwareChanged = true;
+      lastPhysicalState[i] = currentState;
+    }
+
+    if (terisi) {
+      statusSlot[i] = 1;
+    } else {
+      if (statusSlot[i] != 2) {
+        statusSlot[i] = 0;
+      }
+    }
+  }
+
+  if (hardwareChanged && millis() - lastHardwareSend >= HARDWARE_SEND_COOLDOWN) {
+    lastHardwareSend = millis();
+
+    Serial.println("[HW SYNC] SENSOR BERUBAH");
+
+    sendSlotStatusToMQTT();
+
+    if (!isLcdShowingMsg) {
+      updateLcdIdle();
+    }
+  }
+}
+
+void syncSlotDariServer() {
+  // ESP32 tidak lagi request langsung ke api.php.
+  // ESP32 hanya mengirim request via MQTT.
+  if (!wifiConnected) return;
+
+  if (!mqtt.connected()) {
+    connectMQTT();
+  }
+
+  if (mqtt.connected()) {
+    mqtt.publish(TOPIC_SLOT_REQUEST, "{\"source\":\"esp32\",\"request\":\"slot_state\"}");
+    Serial.println("[MQTT] Request slot state");
+  }
+}
+
+// ========================================================================================
+// 10. SCAN QR DAN VALIDASI LEWAT MQTT
+// ========================================================================================
+String kirimQRkeServer(String qr, String gate) {
+  if (!wifiConnected) {
     return "no_wifi";
   }
 
-  HTTPClient http;
-
-  String url = String(SERVER_URL) + "?action=gate_scan";
-
-  http.begin(url);
-  http.addHeader("Content-Type", "application/x-www-form-urlencoded");
-  http.addHeader("Connection", "close");
-  http.setTimeout(5000);
-
-  String postData = "qr_code=" + qr + "&gate=" + gate;
-
-  int code = http.POST(postData);
-
-  String result = "error|Koneksi Gagal";
-
-  if(code == 200){
-
-    String payload = http.getString();
-
-    String msg = "Terjadi Kesalahan";
-
-    int msgIdx = payload.indexOf("\"message\":\"");
-
-    if(msgIdx != -1){
-      int msgStart = msgIdx + 11;
-      int msgEnd = payload.indexOf("\"", msgStart);
-      msg = payload.substring(msgStart, msgEnd);
-    }
-
-    if(payload.indexOf("\"success\"") != -1){
-      result = "success|" + msg;
-    } else {
-      result = "denied|" + msg;
-    }
+  if (!mqtt.connected()) {
+    connectMQTT();
   }
 
-  http.end();
+  if (!mqtt.connected()) {
+    return "error|MQTT Tidak Terhubung";
+  }
 
-  return result;
+  pendingQr = qr;
+  pendingGate = gate;
+  lastGateResult = "";
+  waitingGateResponse = true;
+  gateRequestTimer = millis();
+
+  String payload = "{";
+  payload += "\"qr_code\":\"" + escapeJson(qr) + "\",";
+  payload += "\"gate\":\"" + escapeJson(gate) + "\"";
+  payload += "}";
+
+  bool ok = mqtt.publish(TOPIC_GATE_SCAN, payload.c_str());
+
+  if (!ok) {
+    waitingGateResponse = false;
+    return "error|Publish QR Gagal";
+  }
+
+  Serial.print("[MQTT QR] Publish: ");
+  Serial.println(payload);
+
+  while (waitingGateResponse && millis() - gateRequestTimer < 5000) {
+    mqtt.loop();
+    delay(10);
+  }
+
+  if (waitingGateResponse) {
+    waitingGateResponse = false;
+    return "error|Timeout Server";
+  }
+
+  if (lastGateResult.length() == 0) {
+    return "error|Response Kosong";
+  }
+
+  return lastGateResult;
 }
 
-void handleScanMasuk(String qr){
-
+void handleScanMasuk(String qr) {
   Serial.println("[MASUK]");
 
-  showLcdMessage(
-    "MEMPROSES",
-    "MOHON TUNGGU",
-    "",
-    ""
-  );
+  showLcdMessage("MEMPROSES", "MOHON TUNGGU", "", "");
 
   String response = kirimQRkeServer(qr, "in");
-
   int sepIndex = response.indexOf("|");
 
   String hasil = (sepIndex != -1) ? response.substring(0, sepIndex) : response;
   String pesan = (sepIndex != -1) ? response.substring(sepIndex + 1) : "";
 
-  if(hasil == "success"){
+  if (hasil == "success") {
+    showLcdMessage("AKSES DITERIMA", "SILAKAN MASUK", "PALANG TERBUKA", "");
 
-    showLcdMessage(
-      "AKSES DITERIMA",
-      "SILAKAN MASUK",
-      "PALANG TERBUKA",
-      ""
-    );
-
-    if(!servoMasukAktif){
+    if (!servoMasukAktif) {
       servoMasuk.write(SERVO_BUKA);
       servoMasukAktif = true;
       timerMasuk = millis();
     }
+  } else if (hasil == "no_wifi") {
+    showLcdMessage("MODE OFFLINE", "SILAKAN MASUK", "PALANG TERBUKA", "");
 
-  } else if(hasil == "no_wifi"){
-
-    showLcdMessage(
-      "MODE OFFLINE",
-      "SILAKAN MASUK",
-      "PALANG TERBUKA",
-      ""
-    );
-
-    if(!servoMasukAktif){
+    if (!servoMasukAktif) {
       servoMasuk.write(SERVO_BUKA);
       servoMasukAktif = true;
       timerMasuk = millis();
     }
-
   } else {
-
-    showLcdMessage(
-      "AKSES DITOLAK",
-      "TIDAK VALID",
-      pesan,
-      ""
-    );
+    showLcdMessage("AKSES DITOLAK", "TIDAK VALID", pesan, "");
   }
 }
 
-void handleScanKeluar(String qr){
-
+void handleScanKeluar(String qr) {
   Serial.println("[KELUAR]");
 
-  showLcdMessage(
-    "MEMPROSES",
-    "MOHON TUNGGU",
-    "",
-    ""
-  );
+  showLcdMessage("MEMPROSES", "MOHON TUNGGU", "", "");
 
   String response = kirimQRkeServer(qr, "out");
-
   int sepIndex = response.indexOf("|");
 
   String hasil = (sepIndex != -1) ? response.substring(0, sepIndex) : response;
   String pesan = (sepIndex != -1) ? response.substring(sepIndex + 1) : "";
 
-  if(hasil == "success"){
+  if (hasil == "success") {
+    showLcdMessage("AKSES DITERIMA", "SILAKAN KELUAR", "SALDO -Rp3000", "PALANG TERBUKA");
 
-    showLcdMessage(
-      "AKSES DITERIMA",
-      "SILAKAN KELUAR",
-      "SALDO -Rp3000",
-      "PALANG TERBUKA"
-    );
-
-    if(!servoKeluarAktif){
+    if (!servoKeluarAktif) {
       servoKeluar.write(SERVO_BUKA);
       servoKeluarAktif = true;
       timerKeluar = millis();
     }
+  } else if (hasil == "no_wifi") {
+    showLcdMessage("MODE OFFLINE", "SILAKAN KELUAR", "PALANG TERBUKA", "");
 
-  } else if(hasil == "no_wifi"){
-
-    showLcdMessage(
-      "MODE OFFLINE",
-      "SILAKAN KELUAR",
-      "PALANG TERBUKA",
-      ""
-    );
-
-    if(!servoKeluarAktif){
+    if (!servoKeluarAktif) {
       servoKeluar.write(SERVO_BUKA);
       servoKeluarAktif = true;
       timerKeluar = millis();
     }
-
   } else {
-
-    showLcdMessage(
-      "AKSES DITOLAK",
-      "TIDAK VALID",
-      pesan,
-      ""
-    );
+    showLcdMessage("AKSES DITOLAK", "TIDAK VALID", pesan, "");
   }
 }
 
-void bacaScanner(HardwareSerial &port, String &buffer, void (*handler)(String)){
-
-  while(port.available()){
-
+void bacaScanner(HardwareSerial &port, String &buffer, void (*handler)(String)) {
+  while (port.available()) {
     char c = port.read();
 
-    if(c == '\n' || c == '\r'){
-
+    if (c == '\n' || c == '\r') {
       buffer.trim();
 
-      if(buffer.length() > 0){
+      if (buffer.length() > 0) {
         handler(buffer);
         buffer = "";
       }
-
     } else {
       buffer += c;
     }
   }
 }
 
-void cekServo(Servo &srv, bool &aktif, unsigned long &timer, const char* nama){
-
-  if(aktif && (millis() - timer >= SERVO_BUKA_MS)){
-
+// ========================================================================================
+// 11. SERVO
+// ========================================================================================
+void cekServo(Servo &srv, bool &aktif, unsigned long &timer, const char* nama) {
+  if (aktif && millis() - timer >= SERVO_BUKA_MS) {
     srv.write(SERVO_TUTUP);
     aktif = false;
 
@@ -570,12 +654,14 @@ void cekServo(Servo &srv, bool &aktif, unsigned long &timer, const char* nama){
   }
 }
 
-void setup(){
-
+// ========================================================================================
+// 12. SETUP
+// ========================================================================================
+void setup() {
   Serial.begin(115200);
   delay(1000);
 
-  Serial.println("=== SMART PARKING ===");
+  Serial.println("=== SMART PARKING MQTT ===");
 
   lcd.init();
   lcd.backlight();
@@ -586,6 +672,16 @@ void setup(){
 
   connectWiFi();
 
+  // Untuk prototype TLS HiveMQ.
+  // Untuk produksi lebih aman menggunakan sertifikat CA.
+  secureClient.setInsecure();
+
+  mqtt.setServer(MQTT_SERVER, MQTT_PORT);
+  mqtt.setCallback(mqttCallback);
+  mqtt.setBufferSize(2048);
+
+  connectMQTT();
+
   ScannerMasuk.begin(BAUD_GM65, SERIAL_8N1, GM65_IN_RX, GM65_IN_TX);
   ScannerKeluar.begin(BAUD_GM65, SERIAL_8N1, GM65_OUT_RX, GM65_OUT_TX);
 
@@ -595,7 +691,7 @@ void setup(){
   servoMasuk.write(SERVO_TUTUP);
   servoKeluar.write(SERVO_TUTUP);
 
-  for(int i = 0; i < TOTAL_SLOT; i++){
+  for (int i = 0; i < TOTAL_SLOT; i++) {
     pinMode(irPin[i], INPUT);
   }
 
@@ -603,19 +699,31 @@ void setup(){
   pinMode(SR_LATCH, OUTPUT);
   pinMode(SR_CLOCK, OUTPUT);
 
+  randomSeed(micros());
+
   updateIRSensor();
   updateTrafficLight();
   syncSlotDariServer();
   updateLcdIdle();
 }
 
-void loop(){
-
-  if(WiFi.status() != WL_CONNECTED){
-
+// ========================================================================================
+// 13. LOOP
+// ========================================================================================
+void loop() {
+  if (WiFi.status() != WL_CONNECTED) {
     wifiConnected = false;
     connectWiFi();
+    connectMQTT();
     updateLcdIdle();
+  }
+
+  if (wifiConnected && !mqtt.connected()) {
+    connectMQTT();
+  }
+
+  if (mqtt.connected()) {
+    mqtt.loop();
   }
 
   bacaScanner(ScannerMasuk, bufferMasuk, handleScanMasuk);
@@ -624,34 +732,25 @@ void loop(){
   cekServo(servoMasuk, servoMasukAktif, timerMasuk, "MASUK");
   cekServo(servoKeluar, servoKeluarAktif, timerKeluar, "KELUAR");
 
-  if(millis() - lastIRCheck >= IR_CHECK_MS){
-
+  if (millis() - lastIRCheck >= IR_CHECK_MS) {
     lastIRCheck = millis();
-
     updateIRSensor();
     updateTrafficLight();
   }
 
-  if(!isLcdShowingMsg && (millis() - lastLcdIdleUpdate >= 2000)){
-
+  if (!isLcdShowingMsg && millis() - lastLcdIdleUpdate >= 2000) {
     lastLcdIdleUpdate = millis();
-
     updateLcdIdle();
   }
 
-  if(isLcdShowingMsg && (millis() - lcdMessageTimer >= 4000)){
-
+  if (isLcdShowingMsg && millis() - lcdMessageTimer >= 4000) {
     isLcdShowingMsg = false;
-
     lcd.clear();
-
     updateLcdIdle();
   }
 
-  if(millis() - lastSlotSync >= SLOT_SYNC_MS){
-
+  if (millis() - lastSlotSync >= SLOT_SYNC_MS) {
     lastSlotSync = millis();
-
     syncSlotDariServer();
   }
 

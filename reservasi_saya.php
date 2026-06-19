@@ -1,6 +1,7 @@
 <?php
 session_start();
 require 'db_config.php';
+require_once 'mqtt_config.php';
 date_default_timezone_set('Asia/Jakarta');
 
 if (!isset($_SESSION['user_id'])) { 
@@ -54,6 +55,9 @@ $uid = $_SESSION['user_id'];
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://unpkg.com/paho-mqtt@1.1.0/paho-mqtt-min.js"></script>
+<script src="mqtt_browser_config.php"></script>
+<script src="mqtt_realtime.js"></script>
 
 <script>
     const USER_ID = "<?= $uid ?>";
@@ -119,8 +123,32 @@ $uid = $_SESSION['user_id'];
         } catch(e) {}
     }
     
-    fetchMyTickets();
-    setInterval(fetchMyTickets, 1000);
+    let localTicketTimer = null;
+    let ticketTimeLeft = 0;
+
+    function startTicketRealtime() {
+        fetchMyTickets();
+
+        window.smartParkingRealtimeRefresh = function(reason = '') {
+            fetchMyTickets();
+        };
+
+        if (typeof window.smartParkingStartMqttRealtime === 'function') {
+            window.smartParkingStartMqttRealtime();
+        }
+    }
+
+    startTicketRealtime();
+
+    document.addEventListener("visibilitychange", () => {
+        if (document.hidden) {
+            if (typeof window.smartParkingStopMqttRealtime === 'function') {
+                window.smartParkingStopMqttRealtime();
+            }
+        } else {
+            startTicketRealtime();
+        }
+    });
 
     async function cancelBooking(kode) {
         const result = await Swal.fire({

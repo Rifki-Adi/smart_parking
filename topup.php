@@ -1,6 +1,7 @@
 <?php
 session_start();
 require 'db_config.php';
+require_once 'mqtt_helper.php';
 
 if (!isset($_SESSION['user_id'])) { 
     header("Location: login.php"); 
@@ -36,6 +37,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             $conn->prepare("INSERT INTO transaksi (user_id, tipe, jumlah, keterangan) VALUES (?, 'topup', $nominal, 'Top Up Saldo')")->execute([$uid]);
             
             $conn->commit();
+
+            if (function_exists('smartparking_publish_event')) {
+                smartparking_publish_event('topup_success', 'topup.php', [
+                    'user_id' => $uid,
+                    'jumlah' => $nominal
+                ]);
+            }
             
             $status_topup = 'success';
             $pesan_topup = 'Top Up Rp ' . number_format($nominal, 0, ',', '.') . ' berhasil!';

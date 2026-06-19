@@ -1,6 +1,7 @@
 <?php
 session_start();
 require 'db_config.php';
+require_once 'mqtt_config.php';
 date_default_timezone_set('Asia/Jakarta');
 
 // Mencegah error fatal jika session browser tersangkut sebagai ESP32
@@ -151,6 +152,9 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://unpkg.com/paho-mqtt@1.1.0/paho-mqtt-min.js"></script>
+<script src="mqtt_browser_config.php"></script>
+<script src="mqtt_realtime.js"></script>
 
 <script>
     const USER_ID = "<?= $uid ?>";
@@ -243,32 +247,40 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
         } catch (e) {}
     }
 
-    function startDashboardPolling() {
-        stopDashboardPolling();
+    function refreshDashboardRealtime(reason = '') {
+        fetchUserLiveData();
+        fetchLiveSlots();
 
+        const modalTrx = document.getElementById('modalTrx');
+        if (modalTrx && modalTrx.classList.contains('show')) {
+            fetchAndRenderLive();
+        }
+    }
+
+    function startDashboardRealtime() {
         fetchUserLiveData();
         fetchLiveSlots();
         startUserLocalTimer();
 
-        userLiveInterval = setInterval(fetchUserLiveData, 10000);
-        userSlotInterval = setInterval(fetchLiveSlots, 10000);
+        window.smartParkingRealtimeRefresh = refreshDashboardRealtime;
+        if (typeof window.smartParkingStartMqttRealtime === 'function') {
+            window.smartParkingStartMqttRealtime();
+        }
     }
 
-    function stopDashboardPolling() {
-        if (userLiveInterval) clearInterval(userLiveInterval);
-        if (userSlotInterval) clearInterval(userSlotInterval);
-
-        userLiveInterval = null;
-        userSlotInterval = null;
+    function stopDashboardRealtime() {
+        if (typeof window.smartParkingStopMqttRealtime === 'function') {
+            window.smartParkingStopMqttRealtime();
+        }
     }
 
-    startDashboardPolling();
+    startDashboardRealtime();
 
     document.addEventListener("visibilitychange", () => {
         if (document.hidden) {
-            stopDashboardPolling();
+            stopDashboardRealtime();
         } else {
-            startDashboardPolling();
+            startDashboardRealtime();
         }
     });
 
@@ -361,13 +373,11 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
         resetFilterModal(false);
         new bootstrap.Modal(document.getElementById('modalTrx')).show();
         fetchAndRenderLive();
-        
-        if(liveTrxInterval) clearInterval(liveTrxInterval);
-        liveTrxInterval = setInterval(fetchAndRenderLive, 15000);
     }
 
     document.getElementById('modalTrx').addEventListener('hidden.bs.modal', function () {
-        clearInterval(liveTrxInterval);
+        if(liveTrxInterval) clearInterval(liveTrxInterval);
+        liveTrxInterval = null;
     });
     
     async function fetchAndRenderLive() {

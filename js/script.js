@@ -119,29 +119,27 @@ function startLocalTimer() {
 }
 
 // ===============================
-// POLLING USER DASHBOARD
+// REALTIME USER DASHBOARD VIA MQTT EVENT
 // ===============================
-function startUserPolling() {
-    stopUserPolling();
-
+function refreshUserRealtime(reason = '') {
     fetchLiveSlots();
     fetchUserLiveData();
+}
 
+function startUserPolling() {
+    fetchLiveSlots();
+    fetchUserLiveData();
     startLocalTimer();
 
-    liveSlotInterval = setInterval(fetchLiveSlots, 10000);
-    userLiveInterval = setInterval(fetchUserLiveData, 10000);
+    window.smartParkingRealtimeRefresh = refreshUserRealtime;
+    if (typeof window.smartParkingStartMqttRealtime === 'function') {
+        window.smartParkingStartMqttRealtime();
+    }
 }
 
 function stopUserPolling() {
-    if (liveSlotInterval) {
-        clearInterval(liveSlotInterval);
-        liveSlotInterval = null;
-    }
-
-    if (userLiveInterval) {
-        clearInterval(userLiveInterval);
-        userLiveInterval = null;
+    if (typeof window.smartParkingStopMqttRealtime === 'function') {
+        window.smartParkingStopMqttRealtime();
     }
 }
 

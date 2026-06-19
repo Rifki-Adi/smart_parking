@@ -1,5 +1,6 @@
 <?php
 require 'db_config.php';
+require_once 'mqtt_helper.php';
 
 try {
     $sql = "
@@ -18,7 +19,14 @@ try {
     FROM expired
     ";
 
-    $conn->exec($sql);
+    $affected = $conn->exec($sql);
+
+    if ($affected > 0 && function_exists('smartparking_publish_refresh')) {
+        smartparking_publish_refresh($conn, 'reservation_expired', 'cleanup.php', [
+            'reason' => 'auto_release',
+            'affected_rows' => $affected
+        ]);
+    }
 
     echo "cleanup selesai";
 

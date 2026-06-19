@@ -1,6 +1,7 @@
 <?php
 session_start();
 require 'db_config.php';
+require_once 'mqtt_config.php';
 date_default_timezone_set('Asia/Jakarta');
 
 // Mencegah error fatal jika session browser tersangkut sebagai ESP32
@@ -128,6 +129,9 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://unpkg.com/paho-mqtt@1.1.0/paho-mqtt-min.js"></script>
+<script src="mqtt_browser_config.php"></script>
+<script src="mqtt_realtime.js"></script>
 <script>
     async function fetchLiveAdminSlots() {
         try {
@@ -248,34 +252,41 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
         });
     }
 
-    function startAdminPolling() {
-        stopAdminPolling();
+    function refreshAdminRealtime(reason = '') {
+        fetchLiveAdminSlots();
+        fetchDashboardData();
+    }
 
+    function startAdminRealtime() {
         fetchLiveAdminSlots();
         fetchDashboardData();
 
-        intervalAdminSlots = setInterval(fetchLiveAdminSlots, 10000);
-        intervalDashboard = setInterval(fetchDashboardData, 30000);
-        intervalAdminTimer = setInterval(updateAdminReservationTimers, 1000);
+        if (!intervalAdminTimer) {
+            intervalAdminTimer = setInterval(updateAdminReservationTimers, 1000);
+        }
+
+        window.smartParkingRealtimeRefresh = refreshAdminRealtime;
+        if (typeof window.smartParkingStartMqttRealtime === 'function') {
+            window.smartParkingStartMqttRealtime();
+        }
     }
 
-    function stopAdminPolling() {
-        if (intervalAdminSlots) clearInterval(intervalAdminSlots);
-        if (intervalDashboard) clearInterval(intervalDashboard);
+    function stopAdminRealtime() {
         if (intervalAdminTimer) clearInterval(intervalAdminTimer);
-
-        intervalAdminSlots = null;
-        intervalDashboard = null;
         intervalAdminTimer = null;
+
+        if (typeof window.smartParkingStopMqttRealtime === 'function') {
+            window.smartParkingStopMqttRealtime();
+        }
     }
 
-    startAdminPolling();
+    startAdminRealtime();
 
     document.addEventListener("visibilitychange", () => {
         if (document.hidden) {
-            stopAdminPolling();
+            stopAdminRealtime();
         } else {
-            startAdminPolling();
+            startAdminRealtime();
         }
     });
 </script>

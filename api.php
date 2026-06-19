@@ -3,6 +3,13 @@ error_reporting(0);
 ob_start();
 session_start();
 require 'db_config.php';
+
+// Optional: dipakai kalau kamu sudah menambahkan realtime MQTT helper.
+// Kalau file belum ada, api.php tetap berjalan normal.
+if (file_exists(__DIR__ . '/mqtt_helper.php')) {
+    require_once __DIR__ . '/mqtt_helper.php';
+}
+
 date_default_timezone_set('Asia/Jakarta');
 
 header('Content-Type: application/json');
@@ -34,9 +41,286 @@ function cleanupExpiredReservations($conn) {
 
         $stmt->execute([$expiredAt]);
 
+        if ($stmt->rowCount() > 0) {
+            publishRealtimeSafe($conn, 'reservation_expired', ['reason' => 'auto_release']);
+        }
+
     } catch (Exception $e) {
         // Cleanup jangan sampai bikin API utama gagal.
     }
+}
+
+
+// =============================================
+// HELPER REALTIME MQTT (AMAN JIKA MQTT_HELPER TIDAK ADA)
+// =============================================
+function publishRealtimeSafe($conn, $event, $extra = []) {
+    try {
+        if (function_exists('smartparking_publish_refresh')) {
+            smartparking_publish_refresh($conn, $event, 'api.php', $extra);
+        }
+    } catch (Exception $e) {
+        // Jangan sampai MQTT membuat API utama gagal.
+    }
+}
+
+// =============================================
+// HELPER RIWAYAT SLOT
+// Struktur tabel yang dipakai:
+// id, slot_id, reservasi_id, user_id, tipe_akses, kode_akses,
+// waktu_mulai, waktu_selesai, durasi_menit, status, keterangan, created_at
+//
+// Catatan konsep:
+// - QR reservasi (PK-xxxx)  => reservasi_id TERISI, tipe_akses = reservasi
+// - QR permanen (STIKER-)  => reservasi_id NULL, tipe_akses = permanen
+// =============================================
+function catatRiwayatSlotReservasiMulai($conn, $slot_id, $reservasi_id, $user_id, $kode_akses, $keterangan) {
+    try {
+        $cek = $conn->prepare("
+            SELECT id
+            FROM riwayat_slot
+            WHERE reservasi_id = ?
+            AND tipe_akses = 'reservasi'
+            AND status = 'aktif'
+            LIMIT 1
+        ");
+        $cek->execute([$reservasi_id]);
+        if ($cek->fetch()) {
+            return;
+        }
+
+        $stmt = $conn->prepare("
+            INSERT INTO riwayat_slot
+            (slot_id, reservasi_id, user_id, tipe_akses, kode_akses, waktu_mulai, status, keterangan, created_at)
+            VALUES (?, ?, ?, 'reservasi', ?, NOW(), 'aktif', ?, NOW())
+        ");
+
+        $stmt->execute([
+            $slot_id,
+            $reservasi_id,
+            $user_id,
+            $kode_akses,
+            $keterangan
+        ]);
+    } catch (Exception $e) {
+        // Jangan sampai pencatatan riwayat membuat gate gagal.
+    }
+}
+
+function catatRiwayatSlotPermanenMulai($conn, $slot_id, $user_id, $kode_akses, $keterangan) {
+    try {
+        $cek = $conn->prepare("
+            SELECT id
+            FROM riwayat_slot
+            WHERE user_id = ?
+            AND tipe_akses = 'permanen'
+            AND status = 'aktif'
+            LIMIT 1
+        ");
+        $cek->execute([$user_id]);
+        if ($cek->fetch()) {
+            return;
+        }
+
+        $stmt = $conn->prepare("
+            INSERT INTO riwayat_slot
+            (slot_id, reservasi_id, user_id, tipe_akses, kode_akses, waktu_mulai, status, keterangan, created_at)
+            VALUES (?, NULL, ?, 'permanen', ?, NOW(), 'aktif', ?, NOW())
+        ");
+
+        $stmt->execute([
+            $slot_id,
+            $user_id,
+            $kode_akses,
+            $keterangan
+        ]);
+    } catch (Exception $e) {
+        // Jangan sampai pencatatan riwayat membuat gate gagal.
+    }
+}
+
+function catatRiwayatSlotSelesaiReservasi($conn, $reservasi_id, $keterangan) {
+    try {
+        $stmt = $conn->prepare("
+            UPDATE riwayat_slot
+            SET
+                waktu_selesai = NOW(),
+                durasi_menit = GREATEST(
+                    1,
+                    CEIL(EXTRACT(EPOCH FROM (NOW() - waktu_mulai)) / 60.0)::int
+                ),
+                status = 'selesai',
+                keterangan = ?
+            WHERE reservasi_id = ?
+            AND tipe_akses = 'reservasi'
+            AND status = 'aktif'
+        ");
+
+        $stmt->execute([
+            $keterangan,
+            $reservasi_id
+        ]);
+    } catch (Exception $e) {
+        // Jangan sampai pencatatan riwayat membuat gate gagal.
+    }
+}
+
+function catatRiwayatSlotSelesaiPermanen($conn, $user_id, $keterangan) {
+    try {
+        $stmt = $conn->prepare("
+            WITH target AS (
+                SELECT id
+                FROM riwayat_slot
+                WHERE user_id = ?
+                AND tipe_akses = 'permanen'
+                AND status = 'aktif'
+                ORDER BY waktu_mulai DESC
+                LIMIT 1
+            )
+            UPDATE riwayat_slot
+            SET
+                waktu_selesai = NOW(),
+                durasi_menit = GREATEST(
+                    1,
+                    CEIL(EXTRACT(EPOCH FROM (NOW() - waktu_mulai)) / 60.0)::int
+                ),
+                status = 'selesai',
+                keterangan = ?
+            WHERE id IN (SELECT id FROM target)
+        ");
+
+        $stmt->execute([
+            $user_id,
+            $keterangan
+        ]);
+    } catch (Exception $e) {
+        // Jangan sampai pencatatan riwayat membuat gate gagal.
+    }
+}
+
+
+// =============================================
+// HELPER RIWAYAT SLOT WAJIB (DEBUGGING)
+// Versi ini tidak menyembunyikan error, supaya kalau struktur tabel salah langsung terlihat.
+// =============================================
+function catatRiwayatSlotReservasiMulaiWajib($conn, $slot_id, $reservasi_id, $user_id, $kode_akses, $keterangan) {
+    // Kunci transaksi per user agar scan dobel yang masuk hampir bersamaan tidak membuat 2 riwayat aktif.
+    $lock = $conn->prepare("SELECT pg_advisory_xact_lock(hashtext(?))");
+    $lock->execute([(string)$user_id]);
+
+    // Satu user hanya boleh punya satu riwayat aktif, baik dari QR reservasi maupun QR permanen.
+    $cekAktif = $conn->prepare("
+        SELECT id FROM riwayat_slot
+        WHERE user_id = ?
+        AND status = 'aktif'
+        LIMIT 1
+    ");
+    $cekAktif->execute([$user_id]);
+    if ($cekAktif->fetch()) {
+        return;
+    }
+
+    $cekReservasi = $conn->prepare("
+        SELECT id FROM riwayat_slot
+        WHERE reservasi_id = ?
+        AND tipe_akses = 'reservasi'
+        AND status = 'aktif'
+        LIMIT 1
+    ");
+    $cekReservasi->execute([$reservasi_id]);
+    if ($cekReservasi->fetch()) {
+        return;
+    }
+
+    $stmt = $conn->prepare("
+        INSERT INTO riwayat_slot
+        (slot_id, reservasi_id, user_id, tipe_akses, kode_akses, waktu_mulai, status, keterangan, created_at)
+        VALUES (?, ?, ?, 'reservasi', ?, NOW(), 'aktif', ?, NOW())
+        ON CONFLICT DO NOTHING
+    ");
+    $stmt->execute([$slot_id, $reservasi_id, $user_id, $kode_akses, $keterangan]);
+}
+
+function catatRiwayatSlotReservasiSelesaiWajib($conn, $reservasi_id, $keterangan) {
+    $stmt = $conn->prepare(""
+        . "UPDATE riwayat_slot SET "
+        . "waktu_selesai = NOW(), "
+        . "durasi_menit = GREATEST(1, CEIL(EXTRACT(EPOCH FROM (NOW() - waktu_mulai)) / 60.0)::int), "
+        . "status = 'selesai', "
+        . "keterangan = ? "
+        . "WHERE reservasi_id = ? AND tipe_akses = 'reservasi' AND status = 'aktif'"
+    );
+    $stmt->execute([$keterangan, $reservasi_id]);
+}
+
+function catatRiwayatSlotPermanenMulaiWajib($conn, $slot_id, $user_id, $kode_akses, $keterangan) {
+    // Kunci transaksi per user agar scan dobel yang masuk hampir bersamaan tidak membuat 2 riwayat aktif.
+    $lock = $conn->prepare("SELECT pg_advisory_xact_lock(hashtext(?))");
+    $lock->execute([(string)$user_id]);
+
+    // Satu user hanya boleh punya satu riwayat aktif. Ini yang mencegah double scan masuk.
+    $cek = $conn->prepare("
+        SELECT id FROM riwayat_slot
+        WHERE user_id = ?
+        AND status = 'aktif'
+        LIMIT 1
+    ");
+    $cek->execute([$user_id]);
+    if ($cek->fetch()) {
+        return;
+    }
+
+    $stmt = $conn->prepare("
+        INSERT INTO riwayat_slot
+        (slot_id, reservasi_id, user_id, tipe_akses, kode_akses, waktu_mulai, status, keterangan, created_at)
+        VALUES (?, NULL, ?, 'permanen', ?, NOW(), 'aktif', ?, NOW())
+        ON CONFLICT DO NOTHING
+    ");
+    $stmt->execute([$slot_id, $user_id, $kode_akses, $keterangan]);
+}
+
+function ambilRiwayatPermanenAktif($conn, $user_id) {
+    $stmt = $conn->prepare(""
+        . "SELECT rs.*, s.slot_nomor "
+        . "FROM riwayat_slot rs "
+        . "LEFT JOIN slot s ON rs.slot_id = s.id "
+        . "WHERE rs.user_id = ? AND rs.tipe_akses = 'permanen' AND rs.status = 'aktif' "
+        . "ORDER BY rs.waktu_mulai DESC "
+        . "LIMIT 1"
+    );
+    $stmt->execute([$user_id]);
+    return $stmt->fetch();
+}
+
+function catatRiwayatSlotPermanenSelesaiWajib($conn, $riwayat_id, $keterangan) {
+    $stmt = $conn->prepare(""
+        . "UPDATE riwayat_slot SET "
+        . "waktu_selesai = NOW(), "
+        . "durasi_menit = GREATEST(1, CEIL(EXTRACT(EPOCH FROM (NOW() - waktu_mulai)) / 60.0)::int), "
+        . "status = 'selesai', "
+        . "keterangan = ? "
+        . "WHERE id = ? AND tipe_akses = 'permanen' AND status = 'aktif'"
+    );
+    $stmt->execute([$keterangan, $riwayat_id]);
+}
+
+function assignRiwayatPermanenKeSlotBaru($conn, $slot_id) {
+    $stmt = $conn->prepare(""
+        . "SELECT id FROM riwayat_slot "
+        . "WHERE tipe_akses = 'permanen' AND status = 'aktif' AND slot_id IS NULL "
+        . "ORDER BY waktu_mulai DESC "
+        . "LIMIT 1"
+    );
+    $stmt->execute();
+    $riwayat = $stmt->fetch();
+
+    if ($riwayat) {
+        $upd = $conn->prepare("UPDATE riwayat_slot SET slot_id = ? WHERE id = ?");
+        $upd->execute([$slot_id, $riwayat['id']]);
+        return true;
+    }
+
+    return false;
 }
 
 // Ambil action lebih awal
@@ -105,6 +389,13 @@ if ($action == 'book_slot') {
         $conn->query("UPDATE profiles SET saldo = saldo - 5000 WHERE id = '$uid'");
         $conn->prepare("INSERT INTO transaksi (user_id, tipe, jumlah, keterangan) VALUES (?, 'reservasi', 5000, 'Biaya Reservasi (Booking Slot)')")->execute([$uid]);
         $conn->commit();
+
+        publishRealtimeSafe($conn, 'reservation_created', [
+            'user_id' => $uid,
+            'slot_nomor' => (int)$slot_nomor,
+            'kode_booking' => $kode
+        ]);
+
         echo json_encode(['status' => 'success', 'kode_booking' => $kode, 'qr_url' => "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=$kode"]);
     } catch (Exception $e) { $conn->rollBack(); echo json_encode(['status' => 'error', 'message' => 'Gagal memproses reservasi.']); }
     exit;
@@ -208,6 +499,12 @@ if ($action == 'cancel_booking') {
     $stmt->execute([$kode, $uid]);
     if ($stmt->rowCount() > 0) {
         $conn->prepare("INSERT INTO transaksi (user_id, tipe, jumlah, keterangan) VALUES (?, 'batal', 0, 'Batal Manual Tiket $kode')")->execute([$uid]);
+
+        publishRealtimeSafe($conn, 'reservation_cancelled', [
+            'user_id' => $uid,
+            'kode_booking' => $kode
+        ]);
+
         echo json_encode(['status' => 'success', 'message' => 'Reservasi berhasil dibatalkan.']);
     } else { echo json_encode(['status' => 'error', 'message' => 'Reservasi tidak ditemukan.']); }
     exit;
@@ -309,7 +606,25 @@ if ($action == 'gate_scan') {
                     $conn->beginTransaction();
                     $conn->prepare("INSERT INTO transaksi (user_id, tipe, jumlah, keterangan) VALUES (?, 'parkir', 0, 'Masuk / Check-In (Biaya dipotong saat keluar)')")->execute([$uid]);
                     $conn->query("UPDATE reservasi SET status = 'check-in' WHERE id = " . $booking['id']);
+
+                    catatRiwayatSlotReservasiMulaiWajib(
+                        $conn,
+                        $booking['slot_id'],
+                        $booking['id'],
+                        $uid,
+                        $qr,
+                        'Check-in melalui QR reservasi ' . $qr
+                    );
+
                     $conn->commit();
+
+                    publishRealtimeSafe($conn, 'gate_checkin', [
+                        'user_id' => $uid,
+                        'kode_booking' => $qr,
+                        'gate' => $gate,
+                        'slot_id' => (int)$booking['slot_id']
+                    ]);
+
                     echo json_encode(['status' => 'success', 'message' => 'Reservasi Valid|Silakan Masuk']); exit;
                     
                 } else if ($booking['status'] == 'check-in') {
@@ -323,7 +638,22 @@ if ($action == 'gate_scan') {
                     $conn->prepare("INSERT INTO transaksi (user_id, tipe, jumlah, keterangan) VALUES (?, 'checkout', 3000, 'Keluar / Check-Out (Pembayaran Biaya Parkir)')")->execute([$uid]);
                     $conn->query("UPDATE reservasi SET status = 'selesai' WHERE id = " . $booking['id']);
                     $conn->query("UPDATE slot SET terisi = 'false' WHERE id = " . $booking['slot_id']);
+
+                    catatRiwayatSlotReservasiSelesaiWajib(
+                        $conn,
+                        $booking['id'],
+                        'Check-out melalui QR reservasi ' . $qr
+                    );
+
                     $conn->commit();
+
+                    publishRealtimeSafe($conn, 'gate_checkout', [
+                        'user_id' => $uid,
+                        'kode_booking' => $qr,
+                        'gate' => $gate,
+                        'slot_id' => (int)$booking['slot_id']
+                    ]);
+
                     echo json_encode(['status' => 'success', 'message' => 'Check-out Berhasil|Saldo -Rp 3.000']); exit;
                 }
             } else { echo json_encode(['status' => 'error', 'message' => 'QR Tdk Dikenali!|Atau Tiket Hangus']); exit; }
@@ -335,7 +665,9 @@ if ($action == 'gate_scan') {
             
             if ($user) {
                 $uid = $user['id'];
-                $cek_in = $conn->query("SELECT * FROM reservasi WHERE user_id = '$uid' AND status = 'check-in'")->fetch();
+                // 1) Cek apakah user sedang parkir dari QR reservasi.
+                //    QR permanen boleh dipakai untuk keluar walaupun masuknya menggunakan QR reservasi.
+                $cek_in = $conn->query("SELECT * FROM reservasi WHERE user_id = '$uid' AND status = 'check-in' ORDER BY created_at DESC LIMIT 1")->fetch();
                 
                 if ($cek_in) {
                     if ($gate == 'in') {
@@ -348,32 +680,124 @@ if ($action == 'gate_scan') {
                     $conn->prepare("INSERT INTO transaksi (user_id, tipe, jumlah, keterangan) VALUES (?, 'checkout', 3000, 'Keluar / Check-Out (Pembayaran Biaya Parkir)')")->execute([$uid]);
                     $conn->query("UPDATE reservasi SET status = 'selesai' WHERE id = " . $cek_in['id']);
                     $conn->query("UPDATE slot SET terisi = 'false' WHERE id = " . $cek_in['slot_id']);
+
+                    if (strpos($cek_in['kode_booking'], 'PK-') === 0) {
+                        catatRiwayatSlotReservasiSelesaiWajib(
+                            $conn,
+                            $cek_in['id'],
+                            'Check-out melalui QR permanen ' . $qr . ' untuk reservasi ' . $cek_in['kode_booking']
+                        );
+                    } else {
+                        // Jaga-jaga untuk data lama PL- yang masih ada di tabel reservasi.
+                        $riwayat_permanen = ambilRiwayatPermanenAktif($conn, $uid);
+                        if ($riwayat_permanen) {
+                            catatRiwayatSlotPermanenSelesaiWajib(
+                                $conn,
+                                $riwayat_permanen['id'],
+                                'Check-out melalui QR permanen ' . $qr
+                            );
+                        }
+                    }
+
                     $conn->commit();
+
+                    publishRealtimeSafe($conn, 'gate_checkout_sticker', [
+                        'user_id' => $uid,
+                        'qr_code' => $qr,
+                        'gate' => $gate,
+                        'slot_id' => (int)$cek_in['slot_id']
+                    ]);
+
                     echo json_encode(['status' => 'success', 'message' => 'Check-out Berhasil|Saldo -Rp 3.000']); exit;
-                    
-                } else {
-                    if ($gate == 'out') {
-                        echo json_encode(['status' => 'error', 'message' => 'Akses Ditolak!|Belum Scan Masuk']); 
+                }
+
+                // 2) Kalau tidak ada reservasi check-in, cek riwayat_slot permanen aktif.
+                //    Ini yang dipakai untuk QR permanen tanpa reservasi.
+                $riwayat_permanen = ambilRiwayatPermanenAktif($conn, $uid);
+
+                if ($riwayat_permanen) {
+                    if ($gate == 'in') {
+                        echo json_encode(['status' => 'error', 'message' => 'Akses Ditolak!|Mobil Sdh di Dalam']); 
                         exit;
                     }
 
-                    $punya_pending = $conn->query("SELECT id FROM reservasi WHERE user_id = '$uid' AND status = 'pending' AND created_at >= (NOW() - INTERVAL '60 seconds')")->fetch();
-                    if ($punya_pending) { echo json_encode(['status' => 'error', 'message' => 'Punya Tiket Aktif!|Gunakan QR Aplikasi']); exit; }
-                    
-                    $slot_kosong = $conn->query("SELECT id, slot_nomor FROM slot WHERE terisi = 'false' AND CAST(slot_nomor AS INT) <= 4 AND id NOT IN (SELECT slot_id FROM reservasi WHERE status = 'check-in' OR (status = 'pending' AND created_at >= (NOW() - INTERVAL '60 seconds'))) ORDER BY slot_nomor ASC LIMIT 1")->fetch();
-                    if (!$slot_kosong) { echo json_encode(['status' => 'error', 'message' => 'Mohon Maaf...|Parkir Penuh']); exit; }
-                    
-                    if ($user['saldo'] < 3000) { echo json_encode(['status' => 'error', 'message' => 'Saldo Tdk Cukup!|Min. Rp 3.000']); exit; }
-                    
-                    $kode_langsung = "PL-" . strtoupper(substr(md5(uniqid()), 0, 6)); 
                     $conn->beginTransaction();
-                    $conn->prepare("INSERT INTO transaksi (user_id, tipe, jumlah, keterangan) VALUES (?, 'parkir', 0, 'Masuk / Check-In Langsung (Biaya dipotong saat keluar)')")->execute([$uid]);
-                    $ins = $conn->prepare("INSERT INTO reservasi (user_id, slot_id, kode_booking, status, created_at) VALUES (?, ?, ?, 'check-in', ?)");
-                    $ins->execute([$uid, $slot_kosong['id'], $kode_langsung, $now]);
+                    $conn->query("UPDATE profiles SET saldo = saldo - 3000 WHERE id = '$uid'");
+                    $conn->prepare("INSERT INTO transaksi (user_id, tipe, jumlah, keterangan) VALUES (?, 'checkout', 3000, 'Keluar / Check-Out (Pembayaran Biaya Parkir)')")->execute([$uid]);
+                    catatRiwayatSlotPermanenSelesaiWajib(
+                        $conn,
+                        $riwayat_permanen['id'],
+                        'Check-out melalui QR permanen ' . $qr
+                    );
+                    $conn->query("UPDATE slot SET terisi = 'false' WHERE id = " . $riwayat_permanen['slot_id']);
                     $conn->commit();
-                    
-                    echo json_encode(['status' => 'success', 'message' => 'Akses Stiker Valid|Silakan Masuk']); exit;
+
+                    publishRealtimeSafe($conn, 'gate_checkout_permanent', [
+                        'user_id' => $uid,
+                        'qr_code' => $qr,
+                        'gate' => $gate,
+                        'slot_id' => (int)$riwayat_permanen['slot_id']
+                    ]);
+
+                    echo json_encode(['status' => 'success', 'message' => 'Check-out Berhasil|Saldo -Rp 3.000']); exit;
                 }
+
+                // 3) Kalau gate out tetapi tidak ada data aktif, berarti memang belum masuk.
+                if ($gate == 'out') {
+                    echo json_encode(['status' => 'error', 'message' => 'Akses Ditolak!|Belum Scan Masuk']); 
+                    exit;
+                }
+
+                // 4) Gate in QR permanen tanpa reservasi.
+                $punya_pending = $conn->query("SELECT id FROM reservasi WHERE user_id = '$uid' AND status = 'pending' AND created_at >= (NOW() - INTERVAL '60 seconds')")->fetch();
+                if ($punya_pending) { echo json_encode(['status' => 'error', 'message' => 'Punya Tiket Aktif!|Gunakan QR Aplikasi']); exit; }
+
+                // Saat scan QR permanen di gerbang, sistem belum tahu mobil akan parkir di slot fisik nomor berapa.
+                // Jadi jangan otomatis memilih slot 1. Slot_id riwayat dibuat NULL dulu, lalu diisi saat sensor IR mendeteksi slot sebenarnya.
+                $slot_tersedia = $conn->query("
+                    SELECT COUNT(*)
+                    FROM slot
+                    WHERE terisi = 'false'
+                    AND CAST(slot_nomor AS INT) <= 4
+                    AND id NOT IN (
+                        SELECT slot_id FROM reservasi
+                        WHERE status = 'check-in'
+                           OR (status = 'pending' AND created_at >= (NOW() - INTERVAL '60 seconds'))
+                    )
+                    AND id NOT IN (
+                        SELECT slot_id FROM riwayat_slot
+                        WHERE status = 'aktif'
+                        AND slot_id IS NOT NULL
+                    )
+                ")->fetchColumn();
+
+                if ((int)$slot_tersedia <= 0) { echo json_encode(['status' => 'error', 'message' => 'Mohon Maaf...|Parkir Penuh']); exit; }
+                
+                if ($user['saldo'] < 3000) { echo json_encode(['status' => 'error', 'message' => 'Saldo Tdk Cukup!|Min. Rp 3.000']); exit; }
+                
+                $conn->beginTransaction();
+                $conn->prepare("INSERT INTO transaksi (user_id, tipe, jumlah, keterangan) VALUES (?, 'parkir', 0, 'Masuk / Check-In Langsung QR Permanen')")->execute([$uid]);
+
+                catatRiwayatSlotPermanenMulaiWajib(
+                    $conn,
+                    null,
+                    $uid,
+                    $qr,
+                    'Check-in langsung melalui QR permanen ' . $qr . ' - menunggu deteksi slot fisik'
+                );
+
+                $conn->commit();
+
+                publishRealtimeSafe($conn, 'gate_checkin_permanent', [
+                    'user_id' => $uid,
+                    'qr_code' => $qr,
+                    'gate' => $gate,
+                    'slot_id' => null,
+                    'slot_nomor' => null,
+                    'note' => 'slot_id akan diisi oleh sensor IR'
+                ]);
+                
+                echo json_encode(['status' => 'success', 'message' => 'Akses Stiker Valid|Silakan Masuk']); exit;
             } else { echo json_encode(['status' => 'error', 'message' => 'Stiker Tdk Valid!|Atau Tdk Terdaftar']); exit; }
         }
     } catch (Exception $e) {
@@ -451,19 +875,42 @@ if ($action == 'get_dashboard_data') {
     echo json_encode(['total_user' => (int)$total_user, 'total_saldo' => (int)$total_saldo, 'total_pages' => $total_pages, 'current_page' => $page, 'transactions' => $trx]); exit;
 }
 
-// 9. ACTION: UPDATE DARI SENSOR IR (HARDWARE ESP32) - OPTIMASI ANTI LAG
+// 9. ACTION: UPDATE DARI SENSOR IR (HARDWARE ESP32) - EVENT DRIVEN
 if ($action == 'update_hardware_slots') {
 
     ob_clean();
 
     try {
+        $changed = 0;
+        $newlyOccupiedSlots = [];
+
+        // Ambil kondisi slot sebelum update agar bisa tahu slot mana yang BARU terisi.
+        $oldRows = $conn->query("SELECT id, slot_nomor, terisi FROM slot WHERE CAST(slot_nomor AS INT) <= 4 ORDER BY slot_nomor ASC")->fetchAll(PDO::FETCH_ASSOC);
+        $oldMap = [];
+        foreach ($oldRows as $row) {
+            $oldMap[(int)$row['slot_nomor']] = [
+                'id' => (int)$row['id'],
+                'terisi' => ($row['terisi'] === true || $row['terisi'] === 't' || $row['terisi'] == 1)
+            ];
+        }
+
+        $conn->beginTransaction();
+
         for ($i = 1; $i <= 4; $i++) {
 
             $key = 's' . $i;
 
             if (isset($_GET[$key])) {
 
-                $val = ($_GET[$key] == '1') ? 'true' : 'false';
+                $newBool = ($_GET[$key] == '1');
+                $val = $newBool ? 'true' : 'false';
+                $oldBool = isset($oldMap[$i]) ? $oldMap[$i]['terisi'] : false;
+                $slotId = isset($oldMap[$i]) ? $oldMap[$i]['id'] : null;
+
+                // Jika sebelumnya kosong lalu sekarang terisi, berarti inilah slot fisik sebenarnya.
+                if ($slotId && !$oldBool && $newBool) {
+                    $newlyOccupiedSlots[] = $slotId;
+                }
 
                 $stmt = $conn->prepare("
                     UPDATE slot
@@ -477,15 +924,37 @@ if ($action == 'update_hardware_slots') {
                     $i,
                     $val
                 ]);
+
+                $changed += $stmt->rowCount();
             }
+        }
+
+        // Hubungkan QR permanen terbaru yang belum punya slot_id dengan slot fisik yang baru terisi.
+        $assigned = 0;
+        foreach ($newlyOccupiedSlots as $slotId) {
+            if (assignRiwayatPermanenKeSlotBaru($conn, $slotId)) {
+                $assigned++;
+            }
+        }
+
+        $conn->commit();
+
+        if ($changed > 0 || $assigned > 0) {
+            publishRealtimeSafe($conn, 'hardware_slot_updated', [
+                'changed' => $changed,
+                'assigned_permanent_history' => $assigned
+            ]);
         }
 
         echo json_encode([
             'status' => 'success',
-            'message' => 'Database slot berhasil diupdate oleh hardware'
+            'message' => 'Database slot berhasil diupdate oleh hardware',
+            'changed' => $changed,
+            'assigned_permanent_history' => $assigned
         ]);
 
     } catch (Exception $e) {
+        if ($conn->inTransaction()) { $conn->rollBack(); }
         echo json_encode([
             'status' => 'error',
             'message' => $e->getMessage()
@@ -512,7 +981,8 @@ if ($action == 'delete_user') {
     try {
         $conn->beginTransaction();
         
-        // Hapus juga riwayat transaksi dan reservasi milik user ini agar tidak error
+        // Hapus juga riwayat slot, transaksi, dan reservasi milik user ini agar tidak error
+        $conn->prepare("DELETE FROM riwayat_slot WHERE user_id = ?")->execute([$target_uid]);
         $conn->prepare("DELETE FROM reservasi WHERE user_id = ?")->execute([$target_uid]);
         $conn->prepare("DELETE FROM transaksi WHERE user_id = ?")->execute([$target_uid]);
         
@@ -521,6 +991,11 @@ if ($action == 'delete_user') {
         $stmt->execute([$target_uid]);
         
         $conn->commit();
+
+        publishRealtimeSafe($conn, 'user_deleted', [
+            'user_id' => $target_uid
+        ]);
+
         echo json_encode(['status' => 'success', 'message' => 'Pengguna dan seluruh datanya berhasil dihapus!']);
     } catch (Exception $e) {
         $conn->rollBack();
