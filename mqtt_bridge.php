@@ -8,8 +8,7 @@ use PhpMqtt\Client\ConnectionSettings;
 // =====================================================
 // API WEB KAMU
 // =====================================================
-// Kalau folder project XAMPP kamu berbeda, ubah bagian ini.
-$apiBase = 'http://192.168.0.238/smartparking_mqtt/api.php';
+$apiBase = 'https://smart-parking-rifki-eqfwfbghh3edbyd7.eastasia-01.azurewebsites.net/api.php';
 
 function httpGet($url)
 {
