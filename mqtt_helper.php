@@ -1,217 +1,162 @@
 <?php
-session_start();
-require 'db_config.php';
-require_once 'mqtt_config.php';
-date_default_timezone_set('Asia/Jakarta');
+// =====================================================
+// HELPER MQTT UNTUK API / WEBSITE - OPTIMAL & FAIL FAST
+// =====================================================
+// File ini dipakai oleh api.php, cleanup.php, topup.php, dll.
+// Jika vendor/autoload.php atau mqtt_config.php belum ada, fungsi return false
+// agar halaman tetap berjalan dan tidak fatal error.
 
-if (!isset($_SESSION['user_id'])) { 
-    header("Location: login.php"); 
-    exit; 
+if (file_exists(__DIR__ . '/mqtt_config.php')) {
+    require_once __DIR__ . '/mqtt_config.php';
 }
-$uid = $_SESSION['user_id'];
+
+if (!defined('MQTT_TOPIC_SERVER_EVENT'))  define('MQTT_TOPIC_SERVER_EVENT', 'smartparking/server/event');
+if (!defined('MQTT_TOPIC_SLOT_STATE'))    define('MQTT_TOPIC_SLOT_STATE', 'smartparking/server/slot/state');
+if (!defined('MQTT_USE_TLS'))             define('MQTT_USE_TLS', true);
+
+function smartparking_mqtt_config_ready(): bool
+{
+    return defined('MQTT_HOST') && defined('MQTT_PORT') && defined('MQTT_USER') && defined('MQTT_PASS');
+}
+
+function smartparking_mqtt_autoload_ready(): bool
+{
+    $autoload = __DIR__ . '/vendor/autoload.php';
+    if (!file_exists($autoload)) {
+        return false;
+    }
+
+    require_once $autoload;
+    return class_exists('PhpMqtt\\Client\\MqttClient');
+}
+
+function smartparking_json(array $payload): string
+{
+    return json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+}
+
+function smartparking_mqtt_publish(string $topic, array $payload, int $qos = 0, bool $retain = false): bool
+{
+    if (!smartparking_mqtt_config_ready() || !smartparking_mqtt_autoload_ready()) {
+        return false;
+    }
+
+    try {
+        $clientId = 'php_web_' . uniqid('', true);
+
+        // Fail fast agar request API tidak terasa lambat ketika MQTT sedang bermasalah.
+        $settings = (new \PhpMqtt\Client\ConnectionSettings())
+            ->setUsername(MQTT_USER)
+            ->setPassword(MQTT_PASS)
+            ->setKeepAliveInterval(10)
+            ->setConnectTimeout(2);
+
+        if (defined('MQTT_USE_TLS') && MQTT_USE_TLS) {
+            $settings->setUseTls(true);
+        }
+
+        $mqtt = new \PhpMqtt\Client\MqttClient(
+            MQTT_HOST,
+            MQTT_PORT,
+            $clientId,
+            \PhpMqtt\Client\MqttClient::MQTT_3_1_1
+        );
+
+        $mqtt->connect($settings, true);
+        $mqtt->publish($topic, smartparking_json($payload), $qos, $retain);
+        $mqtt->disconnect();
+
+        return true;
+    } catch (Throwable $e) {
+        // Jangan menampilkan password/credential ke browser.
+        return false;
+    }
+}
+
+function smartparking_publish_event(string $event, string $source = 'api.php', array $extra = []): bool
+{
+    $payload = array_merge([
+        'event' => $event,
+        'source' => $source,
+        'server_time' => date('c'),
+    ], $extra);
+
+    return smartparking_mqtt_publish(MQTT_TOPIC_SERVER_EVENT, $payload, 0, false);
+}
+
+function smartparking_get_slot_state_payload(PDO $conn, string $source = 'api.php'): array
+{
+    $expiredAt = date('Y-m-d H:i:s', time() - 60);
+
+    $slots = $conn->query("SELECT * FROM slot ORDER BY slot_nomor ASC LIMIT 4")
+        ->fetchAll(PDO::FETCH_ASSOC);
+
+    $stmt = $conn->prepare("
+        SELECT slot_id, status, kode_booking, created_at
+        FROM reservasi
+        WHERE status = 'check-in'
+           OR (status = 'pending' AND created_at >= ?)
+    ");
+    $stmt->execute([$expiredAt]);
+    $reservasiAktif = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $map = [];
+    foreach ($reservasiAktif as $r) {
+        $map[$r['slot_id']] = $r;
+    }
+
+    $resultSlots = [];
+
+    foreach ($slots as $s) {
+        $terisiFisik = ($s['terisi'] === true || $s['terisi'] === 't' || $s['terisi'] == 1);
+        $status = 'kosong';
+        $reservasiStatus = null;
+        $kodeBooking = null;
+
+        if ($terisiFisik) {
+            $status = 'terisi';
+        } elseif (isset($map[$s['id']])) {
+            $reservasiStatus = $map[$s['id']]['status'] ?? null;
+            $kodeBooking = $map[$s['id']]['kode_booking'] ?? null;
+
+            if ($reservasiStatus === 'pending') {
+                $status = 'reserved';
+            } elseif ($reservasiStatus === 'check-in') {
+                // Untuk parkir langsung PL-/permanen, sensor fisik tetap penentu slot terisi.
+                $status = (strpos((string)$kodeBooking, 'PL-') === 0) ? 'kosong' : 'reserved';
+            }
+        }
+
+        $resultSlots[] = [
+            'slot_id' => (int)$s['id'],
+            'slot_nomor' => (int)$s['slot_nomor'],
+            'terisi' => $status === 'terisi',
+            'status' => $status,
+            'reservasi_status' => $reservasiStatus,
+            'kode_booking' => $kodeBooking,
+        ];
+    }
+
+    return [
+        'event' => 'slot_state',
+        'slots' => $resultSlots,
+        'source' => $source,
+        'server_time' => date('c'),
+    ];
+}
+
+function smartparking_publish_slot_state(PDO $conn, string $source = 'api.php'): bool
+{
+    $payload = smartparking_get_slot_state_payload($conn, $source);
+    return smartparking_mqtt_publish(MQTT_TOPIC_SLOT_STATE, $payload, 0, false);
+}
+
+function smartparking_publish_refresh(PDO $conn, string $event, string $source = 'api.php', array $extra = []): void
+{
+    // Event dikirim dulu agar dashboard segera fetch data baru.
+    smartparking_publish_event($event, $source, $extra);
+
+    // Slot state tetap dipublish untuk ESP32/browser, tapi jika MQTT gagal API tetap lanjut.
+    smartparking_publish_slot_state($conn, $source);
+}
 ?>
-
-<!DOCTYPE html>
-<html lang="id">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>QR Saya - Smart Parking</title>
-    <link rel="icon" href="logo 1.png" type="image/png">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-    <link rel="stylesheet" href="css/style.css">
-</head>
-<body>
-
-<nav class="navbar navbar-expand-lg sticky-top mb-4 py-2">
-    <div class="container">
-        <a class="navbar-brand d-flex align-items-center" href="dashboard.php">
-            <img src="Logo.png" alt="Smart Parking Logo" style="height: 80px; width: auto;">
-        </a>
-        <button class="navbar-toggler border-0" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-            <span class="navbar-toggler-icon"></span>
-        </button>
-        <div class="collapse navbar-collapse" id="navbarNav">
-            <ul class="navbar-nav ms-auto align-items-center">
-                <li class="nav-item"><a class="nav-link fw-bold" href="dashboard.php">Beranda</a></li>
-                <li class="nav-item"><a class="nav-link active fw-bold" style="color: var(--primary-color);" href="reservasi_saya.php">QR Saya</a></li>
-                <li class="nav-item"><a class="nav-link text-danger fw-bold" href="logout.php">Keluar</a></li>
-            </ul>
-        </div>
-    </div>
-</nav>
-
-<div class="container mt-3">
-    <h4 class="fw-bold mb-4" style="color: var(--primary-color);"><i class="fas fa-calendar-check me-2" style="color: var(--accent-color);"></i> Reservasi Aktif Anda</h4>
-    
-    <div class="row g-4" id="ticket-container">
-        <div class="col-12 text-center py-5">
-            <i class="fas fa-circle-notch fa-spin fa-3x text-muted mb-3"></i>
-            <h5 class="fw-bold text-muted">Memeriksa Tiket Aktif...</h5>
-        </div>
-    </div>
-</div>
-
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-<script src="https://unpkg.com/paho-mqtt@1.1.0/paho-mqtt-min.js"></script>
-<script src="mqtt_browser_config.php"></script>
-<script src="js/mqtt_realtime.js"></script>
-
-<script>
-    const USER_ID = "<?= $uid ?>";
-
-    async function fetchMyTickets() {
-        try {
-            let res = await fetch(`api.php?action=get_user_live_data&uid=${USER_ID}&_=${Date.now()}`);
-            let data = await res.json();
-            
-            let container = document.getElementById('ticket-container');
-            
-            if (data.tiket.length === 0) {
-                container.innerHTML = `<div class="col-12 text-center py-5">
-                    <i class="fas fa-box-open fa-4x text-muted mb-3 opacity-50"></i>
-                    <h5 class="fw-bold text-muted">Belum ada reservasi aktif</h5>
-                    <p class="text-muted">Silakan lakukan reservasi slot parkir di halaman utama.</p>
-                    <a href="dashboard.php" class="btn btn-primary rounded-pill px-4 mt-2 fw-bold">Reservasi Sekarang</a>
-                </div>`;
-                return;
-            }
-
-            let html = '';
-            data.tiket.forEach(t => {
-                let badgeStatus = t.status === 'pending' 
-                    ? `<div class="position-absolute top-0 end-0 bg-warning text-dark px-3 py-1 fw-bold border-bottom border-start" style="border-radius: 0 16px 0 16px; font-size: 0.8rem;">MENUNGGU MASUK</div>`
-                    : `<div class="position-absolute top-0 end-0 bg-danger text-white px-3 py-1 fw-bold border-bottom border-start" style="border-radius: 0 16px 0 16px; font-size: 0.8rem;">SEDANG PARKIR</div>`;
-
-                let timerHtml = '';
-                if (t.status === 'pending' && data.time_left > 0) {
-                    let m = Math.floor(data.time_left / 60);
-                    let s = data.time_left % 60;
-                    let textWaktu = "0" + m + ":" + (s < 10 ? "0"+s : s);
-                    timerHtml = `<div class="mb-3"><span class="badge bg-danger rounded-pill px-3 py-2 fw-normal shadow-sm"><i class="fas fa-clock me-1"></i> Hangus dalam: <span class="fw-bold">${textWaktu}</span></span></div>`;
-                } else if (t.status === 'pending' && data.time_left <= 0) {
-                    timerHtml = `<div class="mb-3"><span class="badge bg-secondary rounded-pill px-3 py-2 fw-normal shadow-sm"><i class="fas fa-clock me-1"></i> Hangus / Batal</span></div>`;
-                }
-
-                let btnBatal = t.status === 'check-in' ? 'disabled' : '';
-
-                html += `<div class="col-md-6 col-lg-4">
-                    <div class="card card-custom p-4 border-0 text-center position-relative overflow-hidden shadow-sm">
-                        ${badgeStatus}
-                        <h5 class="fw-bold mt-3 mb-1">SLOT ${t.slot_nomor}</h5>
-                        <p class="text-muted small mb-2">${t.tgl_format}</p>
-                        ${timerHtml}
-                        <h4 class="fw-bold mb-4" style="color: var(--primary-color);">${t.kode_booking}</h4>
-                        <div class="row g-2">
-                            <div class="col-6">
-                                <button type="button" onclick="lihatQR('${t.kode_booking}')" class="btn btn-outline-primary w-100 rounded-pill fw-bold">
-                                    <i class="fas fa-qrcode me-1"></i> Lihat QR
-                                </button>
-                            </div>
-                            <div class="col-6">
-                                <button type="button" onclick="cancelBooking('${t.kode_booking}')" class="btn btn-danger w-100 rounded-pill fw-bold ${btnBatal}">
-                                    <i class="fas fa-times me-1"></i> Batal
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>`;
-            });
-            container.innerHTML = html;
-        } catch(e) {}
-    }
-    
-    let localTicketTimer = null;
-    let ticketTimeLeft = 0;
-
-    function startTicketRealtime() {
-        fetchMyTickets();
-
-        window.smartParkingRealtimeRefresh = function(reason = '') {
-            fetchMyTickets();
-        };
-
-        if (typeof window.smartParkingStartMqttRealtime === 'function') {
-            window.smartParkingStartMqttRealtime();
-        }
-    }
-
-    startTicketRealtime();
-
-    document.addEventListener("visibilitychange", () => {
-        if (document.hidden) {
-            if (typeof window.smartParkingStopMqttRealtime === 'function') {
-                window.smartParkingStopMqttRealtime();
-            }
-        } else {
-            startTicketRealtime();
-        }
-    });
-
-    async function cancelBooking(kode) {
-        const result = await Swal.fire({
-            title: 'Batalkan Reservasi?', html: `Menghapus reservasi <b>${kode}</b>.<br><small class="text-danger">Saldo Rp 5.000 tidak akan dikembalikan.</small>`,
-            icon: 'warning', showCancelButton: true, confirmButtonColor: '#e74c3c', cancelButtonColor: '#95a5a6', confirmButtonText: 'Ya, Batalkan', reverseButtons: true
-        });
-
-        if (!result.isConfirmed) return;
-        Swal.fire({ title: 'Menghapus...', allowOutsideClick: false, didOpen: () => { Swal.showLoading() } });
-
-        let fd = new FormData();
-        fd.append('kode_booking', kode);
-        fd.append('user_id', USER_ID);
-
-        try {
-            let res = await fetch('api.php?action=cancel_booking', { method: 'POST', body: fd });
-            let data = await res.json();
-            if (data.status === 'success') {
-                // MENGEMBALIKAN TOMBOL OK
-                await Swal.fire({ icon: 'success', title: 'Berhasil!', text: data.message, confirmButtonColor: '#559da0' });
-                fetchMyTickets(); 
-            } else { Swal.fire('Gagal!', data.message, 'error'); }
-        } catch (e) { Swal.fire('Error!', 'Gagal menghubungi server.', 'error'); }
-    }
-
-    function lihatQR(kode) {
-        const url = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${kode}`;
-        Swal.fire({ 
-            title: 'QR Tiket Reservasi', 
-            html: `
-                <div class="mb-3 text-center"><img src="${url}" width="200" height="200" class="rounded shadow-sm border p-2"></div>
-                <p class="text-muted small mb-1">Kode Tiket (Bisa di-copy):</p>
-                <div class="input-group justify-content-center px-4">
-                    <input type="text" id="qr-res-copy-text" class="form-control text-center fw-bold bg-light" value="${kode}" readonly>
-                    <button class="btn btn-outline-secondary" onclick="copyToClipboard('qr-res-copy-text')" type="button"><i class="fas fa-copy"></i></button>
-                </div>
-            `,
-            showCancelButton: true, confirmButtonColor: '#559da0', cancelButtonColor: '#1a365d', 
-            confirmButtonText: '<i class="fas fa-download"></i> Unduh QR', cancelButtonText: 'Tutup'
-        }).then((result) => { if (result.isConfirmed) downloadQR(kode, 'Reservasi'); });
-    }
-
-    function copyToClipboard(elementId) {
-        var copyText = document.getElementById(elementId);
-        copyText.select();
-        copyText.setSelectionRange(0, 99999); 
-        navigator.clipboard.writeText(copyText.value).then(() => {
-            // MENGEMBALIKAN TOMBOL OK
-            Swal.fire({ title: 'Tersalin!', text: copyText.value, icon: 'success', confirmButtonColor: '#559da0' });
-        });
-    }
-
-    async function downloadQR(kode, tipe) {
-        const url = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${kode}`;
-        try {
-            const resp = await fetch(url);
-            const blob = await resp.blob();
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = `QR_${tipe}_${kode}.png`;
-            a.click();
-        } catch (e) {}
-    }
-</script>
-</body>
-</html>
