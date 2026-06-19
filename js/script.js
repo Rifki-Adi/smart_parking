@@ -2,16 +2,29 @@ let liveSlotInterval = null;
 let userLiveInterval = null;
 let timerInterval = null;
 let liveTimeLeft = 0;
+let liveSlotsBusy = false;
+let userLiveBusy = false;
+let lastLiveSlotsHash = '';
+let lastUserLiveHash = '';
 
 // ===============================
 // SLOT REALTIME
 // ===============================
 async function fetchLiveSlots() {
+    if (liveSlotsBusy || document.hidden) return;
+    liveSlotsBusy = true;
+
     try {
         const uid = typeof USER_ID !== 'undefined' ? USER_ID : '';
 
-        const response = await fetch(`api.php?action=get_slots&uid=${uid}&_=${Date.now()}`);
+        const response = await fetch(`api.php?action=get_slots&uid=${uid}&_=${Date.now()}`, { cache: 'no-store' });
         const slots = await response.json();
+        const hash = JSON.stringify(slots);
+
+        if (hash === lastLiveSlotsHash) {
+            return;
+        }
+        lastLiveSlotsHash = hash;
 
         slots.forEach(slot => {
             const slotElement = document.getElementById(`slot-box-${slot.slot_nomor}`);
@@ -60,6 +73,8 @@ async function fetchLiveSlots() {
 
     } catch (e) {
         console.log("Gagal ambil slot:", e);
+    } finally {
+        liveSlotsBusy = false;
     }
 }
 
@@ -67,23 +82,32 @@ async function fetchLiveSlots() {
 // TIMER RESERVASI USER
 // ===============================
 async function fetchUserLiveData() {
+    if (userLiveBusy || document.hidden) return;
+    userLiveBusy = true;
+
     try {
         const uid = typeof USER_ID !== 'undefined' ? USER_ID : '';
 
-        const response = await fetch(`api.php?action=get_user_live_data&uid=${uid}&_=${Date.now()}`);
+        const response = await fetch(`api.php?action=get_user_live_data&uid=${uid}&_=${Date.now()}`, { cache: 'no-store' });
         const data = await response.json();
+        const hash = JSON.stringify(data);
 
-        liveTimeLeft = parseInt(data.time_left || 0);
+        if (hash !== lastUserLiveHash) {
+            lastUserLiveHash = hash;
+            liveTimeLeft = parseInt(data.time_left || 0);
 
-        const saldoEl = document.getElementById('teks-saldo');
-        if (saldoEl && typeof data.saldo !== 'undefined') {
-            saldoEl.innerText = 'Rp ' + parseInt(data.saldo).toLocaleString('id-ID');
+            const saldoEl = document.getElementById('teks-saldo');
+            if (saldoEl && typeof data.saldo !== 'undefined') {
+                saldoEl.innerText = 'Rp ' + parseInt(data.saldo).toLocaleString('id-ID');
+            }
+
+            updateTimerDisplay();
         }
-
-        updateTimerDisplay();
 
     } catch (e) {
         console.log("Gagal ambil live data:", e);
+    } finally {
+        userLiveBusy = false;
     }
 }
 
@@ -121,9 +145,19 @@ function startLocalTimer() {
 // ===============================
 // REALTIME USER DASHBOARD VIA MQTT EVENT
 // ===============================
-function refreshUserRealtime(reason = '') {
+function refreshUserRealtime(eventName = '', payload = null) {
     fetchLiveSlots();
-    fetchUserLiveData();
+
+    const userDataEvents = [
+        'reservation_created', 'reservation_cancelled', 'reservation_expired',
+        'gate_checkin', 'gate_checkout', 'gate_checkin_permanent',
+        'gate_checkout_permanent', 'gate_checkout_sticker', 'topup_success',
+        'gate_scan_processed', 'slot_state_requested'
+    ];
+
+    if (!eventName || userDataEvents.includes(eventName)) {
+        fetchUserLiveData();
+    }
 }
 
 function startUserPolling() {
