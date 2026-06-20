@@ -163,10 +163,9 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
     let userSlotInterval = null;
     let userTimerInterval = null;
     let userTimeLeft = 0;
-    let userLiveBusy = false;
-    let userSlotBusy = false;
-    let lastUserLiveHash = '';
-    let lastUserSlotHash = '';
+    let loadingUserData = false;
+    let loadingSlots = false;
+    let loadingModalTrx = false;
 
     function formatCountdown(seconds) {
         seconds = Math.max(0, parseInt(seconds || 0));
@@ -202,45 +201,30 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
     }
 
     async function fetchUserLiveData() {
-        if (userLiveBusy || document.hidden) return;
-        userLiveBusy = true;
-
+        if (loadingUserData) return;
+        loadingUserData = true;
         try {
-            let res = await fetch(`api.php?action=get_user_live_data&uid=${USER_ID}&_=${Date.now()}`, { cache: 'no-store' });
+            let res = await fetch(`api.php?action=get_user_live_data&uid=${USER_ID}&_=${Date.now()}`);
             let data = await res.json();
-            let hash = JSON.stringify(data);
 
-            if (hash !== lastUserLiveHash) {
-                lastUserLiveHash = hash;
-
-                let elSaldo = document.getElementById('teks-saldo');
-                if (elSaldo && typeof data.saldo !== 'undefined') {
-                    elSaldo.innerText = 'Rp ' + parseInt(data.saldo || 0).toLocaleString('id-ID');
-                }
-
-                userTimeLeft = parseInt(data.time_left || 0);
-                updateUserCountdownDisplay();
+            let elSaldo = document.getElementById('teks-saldo');
+            if(elSaldo) {
+                elSaldo.innerText = 'Rp ' + data.saldo.toLocaleString('id-ID');
             }
-        } catch (e) {
-            console.log('Gagal ambil live user:', e);
-        } finally {
-            userLiveBusy = false;
+
+            userTimeLeft = parseInt(data.time_left || 0);
+            updateUserCountdownDisplay();
+        } catch (e) {} finally {
+            loadingUserData = false;
         }
     }
 
     async function fetchLiveSlots() {
-        if (userSlotBusy || document.hidden) return;
-        userSlotBusy = true;
-
+        if (loadingSlots) return;
+        loadingSlots = true;
         try {
-            const response = await fetch(`api.php?action=get_slots&uid=${USER_ID}&_=${Date.now()}`, { cache: 'no-store' });
+            const response = await fetch(`api.php?action=get_slots&uid=${USER_ID}&_=${Date.now()}`);
             const slots = await response.json();
-            const hash = JSON.stringify(slots);
-
-            if (hash === lastUserSlotHash) {
-                return;
-            }
-            lastUserSlotHash = hash;
             
             let htmlContainer = '';
 
@@ -268,32 +252,23 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
                 htmlContainer += `<div class="col"><div id="slot-box-${slot.slot_nomor}" class="slot-card p-3 border rounded-4 text-center ${cls}"><i class="fas fa-car fa-2x mb-2"></i><h6 class="fw-bold mb-0">Slot ${slot.slot_nomor}</h6><div id="slot-btn-${slot.slot_nomor}">${btn_html}</div></div></div>`;
             });
 
-            const slotArea = document.getElementById('slot-area-container');
-            if (slotArea) slotArea.innerHTML = htmlContainer;
-        } catch (e) {
-            console.log('Gagal ambil slot:', e);
-        } finally {
-            userSlotBusy = false;
+            document.getElementById('slot-area-container').innerHTML = htmlContainer;
+        } catch (e) {} finally {
+            loadingSlots = false;
         }
     }
 
-    function refreshDashboardRealtime(eventName = '', payload = null) {
+    function refreshDashboardRealtime(info = {}) {
+        const eventName = (info && info.event) ? info.event : '';
         fetchLiveSlots();
 
-        const userDataEvents = [
-            'reservation_created', 'reservation_cancelled', 'reservation_expired',
-            'gate_checkin', 'gate_checkout', 'gate_checkin_permanent',
-            'gate_checkout_permanent', 'gate_checkout_sticker', 'topup_success',
-            'gate_scan_processed', 'slot_state_requested'
-        ];
-
-        if (!eventName || userDataEvents.includes(eventName)) {
+        if (eventName !== 'slot_state' && eventName !== 'slot_hardware_updated') {
             fetchUserLiveData();
-        }
 
-        const modalTrx = document.getElementById('modalTrx');
-        if (modalTrx && modalTrx.classList.contains('show') && userDataEvents.includes(eventName)) {
-            fetchAndRenderLive();
+            const modalTrx = document.getElementById('modalTrx');
+            if (modalTrx && modalTrx.classList.contains('show')) {
+                fetchAndRenderLive();
+            }
         }
     }
 
@@ -421,11 +396,15 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
     });
     
     async function fetchAndRenderLive() {
+        if (loadingModalTrx) return;
+        loadingModalTrx = true;
         try {
             const response = await fetch(`api.php?action=get_user_trx&user_id=${USER_ID}&_=${Date.now()}`);
             globalTrxData = await response.json();
             renderTrxTable();
-        } catch (e) {}
+        } catch (e) {} finally {
+            loadingModalTrx = false;
+        }
     }
 
     function setSortTrx(colName) {
