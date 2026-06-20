@@ -133,25 +133,12 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
 <script src="mqtt_browser_config.php"></script>
 <script src="js/mqtt_realtime.js"></script>
 <script>
-    let adminSlotBusy = false;
-    let adminDashboardBusy = false;
-    let lastAdminSlotHash = '';
-    let lastAdminDashboardHash = '';
-
     async function fetchLiveAdminSlots() {
-        if (adminSlotBusy || document.hidden) return;
-        adminSlotBusy = true;
-
+        if (loadingAdminSlots) return;
+        loadingAdminSlots = true;
         try {
-            const res = await fetch(`api.php?action=get_slots_admin&_=${Date.now()}`, { cache: 'no-store' });
+            const res = await fetch(`api.php?action=get_slots_admin&_=${Date.now()}`);
             const data = await res.json();
-            const hash = JSON.stringify(data);
-
-            if (hash === lastAdminSlotHash) {
-                return;
-            }
-            lastAdminSlotHash = hash;
-
             document.getElementById('header-kapasitas').innerText = `Live Slot Monitor (Terisi: ${data.terpakai} / ${data.total})`;
             let htmlContainer = '';
             data.slots.forEach(slot => {
@@ -178,14 +165,14 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
                 htmlContainer += `<div class="col"><div id="slot-box-${slot.slot_nomor}" class="slot-card p-3 border rounded-4 text-center ${borderState}" style="min-height: 140px;">${innerHtml}</div></div>`;
             });
             document.getElementById('slot-area-container').innerHTML = htmlContainer;
-        } catch (e) {
-            console.log('Gagal ambil slot admin:', e);
-        } finally {
-            adminSlotBusy = false;
+        } catch (e) {} finally {
+            loadingAdminSlots = false;
         }
     }
 
     let currentPage = 1; let currentSortCol = 'created_at'; let currentSortDir = 'desc';
+    let loadingAdminSlots = false;
+    let loadingDashboardData = false;
     function setSortCol(colName) { if (currentSortCol === colName) { currentSortDir = (currentSortDir === 'asc') ? 'desc' : 'asc'; } else { currentSortCol = colName; currentSortDir = 'asc'; } updateSortIcons(); resetPageAndFetch(); }
     function updateSortIcons() { const cols = ['created_at', 'nama', 'tipe', 'jumlah']; cols.forEach(c => { let icon = document.getElementById('icon-sort-' + c); icon.className = 'icon-sort'; if (c === currentSortCol) { icon.classList.add('fas'); icon.classList.add(currentSortDir === 'asc' ? 'fa-sort-up' : 'fa-sort-down'); icon.classList.add('active'); } else { icon.classList.add('fas', 'fa-sort'); } }); }
     function resetPageAndFetch() { currentPage = 1; fetchDashboardData(); }
@@ -203,17 +190,14 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
     function changePage(page) { currentPage = page; fetchDashboardData(); }
 
     async function fetchDashboardData() {
-        if (adminDashboardBusy || document.hidden) return;
-        adminDashboardBusy = true;
+        if (loadingDashboardData) return;
+        loadingDashboardData = true;
         let fTipe = document.getElementById('filter_tipe').value; 
         let fTglMulai = document.getElementById('filter_tgl_mulai').value;
         let fTglSelesai = document.getElementById('filter_tgl_selesai').value;
         try {
             const res = await fetch(`api.php?action=get_dashboard_data&p=${currentPage}&tipe=${fTipe}&tgl_mulai=${fTglMulai}&tgl_selesai=${fTglSelesai}&sort_col=${currentSortCol}&sort_dir=${currentSortDir}&_=${Date.now()}`);
             const data = await res.json();
-            const dataHash = JSON.stringify(data);
-            if (dataHash === lastAdminDashboardHash) { return; }
-            lastAdminDashboardHash = dataHash;
             document.getElementById('total_user_card').innerText = data.total_user; document.getElementById('total_saldo_card').innerText = 'Rp ' + data.total_saldo.toLocaleString('id-ID');
             
             let tbody = document.getElementById('trx_table_body'); let html = '';
@@ -246,10 +230,8 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
                 pHtml += `<li class="page-item ${data.current_page >= data.total_pages ? 'disabled' : ''}"><a class="page-link shadow-sm border-0 rounded" href="#" onclick="changePage(${data.current_page + 1}); return false;">Next &raquo;</a></li></ul>`;
                 pagContainer.innerHTML = pHtml;
             } else { pagContainer.innerHTML = ''; }
-        } catch (e) {
-            console.log('Gagal ambil dashboard admin:', e);
-        } finally {
-            adminDashboardBusy = false;
+        } catch (e) {} finally {
+            loadingDashboardData = false;
         }
     }
 
@@ -280,18 +262,28 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
         });
     }
 
-    function refreshAdminRealtime(eventName = '', payload = null) {
+    function refreshAdminRealtime(info = {}) {
+        const eventName = (info && info.event) ? info.event : '';
+
+        // Perubahan slot cukup update kartu slot saja.
         fetchLiveAdminSlots();
 
-        const dashboardEvents = [
-            'reservation_created', 'reservation_cancelled', 'reservation_expired',
-            'gate_checkin', 'gate_checkout', 'gate_checkin_permanent',
-            'gate_checkout_permanent', 'gate_checkout_sticker', 'topup_success',
-            'user_deleted', 'gate_scan_processed'
+        // Tabel transaksi/admin card hanya di-refresh kalau event memang memengaruhi transaksi/user.
+        const heavyEvents = [
+            'gate_scan_processed',
+            'gate_checkin',
+            'gate_checkout',
+            'gate_checkin_permanent',
+            'gate_checkout_permanent',
+            'gate_checkout_sticker',
+            'reservation_expired',
+            'booking_created',
+            'booking_cancelled',
+            'topup_created',
+            'user_deleted'
         ];
 
-        // Data tabel transaksi/admin tidak perlu diambil ulang untuk event sensor slot biasa.
-        if (!eventName || dashboardEvents.includes(eventName)) {
+        if (heavyEvents.includes(eventName)) {
             fetchDashboardData();
         }
     }
