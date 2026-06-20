@@ -13,6 +13,14 @@ if (file_exists(__DIR__ . '/mqtt_helper.php')) {
 date_default_timezone_set('Asia/Jakarta');
 
 header('Content-Type: application/json');
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+// Jika request berasal dari mqtt_bridge.php, API tidak perlu publish MQTT lagi.
+// Ini mencegah koneksi MQTT ganda dari Azure yang bikin QR scan timeout/lemot.
+function isSilentRealtimeRequest(): bool {
+    return (isset($_GET['silent']) && $_GET['silent'] == '1')
+        || (isset($_POST['silent']) && $_POST['silent'] == '1');
+}
 
 // =============================================
 // CLEANUP OTOMATIS RESERVASI EXPIRED
@@ -55,12 +63,18 @@ function cleanupExpiredReservations($conn) {
 // HELPER REALTIME MQTT (AMAN JIKA MQTT_HELPER TIDAK ADA)
 // =============================================
 function publishRealtimeSafe($conn, $event, $extra = []) {
+    // Untuk request dari bridge MQTT, jangan publish MQTT dari api.php lagi.
+    // Bridge akan publish gate_response, slot_state, dan server_event sendiri.
+    if (function_exists('isSilentRealtimeRequest') && isSilentRealtimeRequest()) {
+        return;
+    }
+
     try {
         if (function_exists('smartparking_publish_refresh')) {
             smartparking_publish_refresh($conn, $event, 'api.php', $extra);
         }
-    } catch (Exception $e) {
-        // Jangan sampai MQTT membuat API utama gagal.
+    } catch (Throwable $e) {
+        // Jangan sampai MQTT membuat API utama gagal atau lambat.
     }
 }
 
