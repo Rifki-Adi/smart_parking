@@ -6,44 +6,52 @@ use PhpMqtt\Client\MqttClient;
 use PhpMqtt\Client\ConnectionSettings;
 
 // =====================================================
-// MQTT BRIDGE OPTIMAL / REALTIME RINGAN
+// API WEB KAMU
 // =====================================================
-// Alur: ESP32/MQTTX -> HiveMQ -> mqtt_bridge.php -> api.php -> Supabase
-// Perbaikan utama:
-// - Tidak subscribe smartparking/# agar bridge tidak memproses pesan buatannya sendiri.
-// - Timeout HTTP diperkecil agar tidak menggantung lama.
-// - Pesan slot yang sama tidak diproses berulang.
-// - Scan QR dobel dalam waktu dekat diabaikan agar tidak double proses.
-// - Publish realtime hanya saat data benar-benar berubah.
+// Bisa dipindah ke mqtt_config.php dengan define('API_BASE_URL', 'https://.../api.php');
+$apiBase = defined('API_BASE_URL')
+    ? API_BASE_URL
+    : 'https://smart-parking-rifki-eqfwfbghh3edbyd7.eastasia-01.azurewebsites.net/api.php';
 
-// Ganti jika domain Azure berubah. Jangan pakai slash di belakang api.php.
-$apiBase = 'https://smart-parking-rifki-eqfwfbghh3edbyd7.eastasia-01.azurewebsites.net/api.php';
+// Topic yang diproses bridge. Jangan subscribe smartparking/# agar bridge tidak memproses pesan publish miliknya sendiri.
+$inputTopics = [
+    MQTT_TOPIC_SLOT_STATUS,
+    MQTT_TOPIC_GATE_SCAN,
+    MQTT_TOPIC_SLOT_REQUEST,
+];
 
-// Fallback jika topic belum didefinisikan di mqtt_config.php
-if (!defined('MQTT_TOPIC_SLOT_STATUS'))   define('MQTT_TOPIC_SLOT_STATUS', 'smartparking/slot/status');
-if (!defined('MQTT_TOPIC_GATE_SCAN'))     define('MQTT_TOPIC_GATE_SCAN', 'smartparking/gate/scan');
-if (!defined('MQTT_TOPIC_SLOT_REQUEST'))  define('MQTT_TOPIC_SLOT_REQUEST', 'smartparking/slot/request');
-if (!defined('MQTT_TOPIC_GATE_RESPONSE')) define('MQTT_TOPIC_GATE_RESPONSE', 'smartparking/gate/response');
-if (!defined('MQTT_TOPIC_SERVER_EVENT'))  define('MQTT_TOPIC_SERVER_EVENT', 'smartparking/server/event');
-if (!defined('MQTT_TOPIC_SLOT_STATE'))    define('MQTT_TOPIC_SLOT_STATE', 'smartparking/server/slot/state');
-if (!defined('MQTT_USE_TLS'))             define('MQTT_USE_TLS', true);
+$lastSlotHash = null;
+$lastQrCache = []; // key => unix_ms
 
-function shortJson(array $data): string
+function nowMs(): int
 {
-    return json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    return (int) round(microtime(true) * 1000);
 }
 
-function httpRequest(string $method, string $url, array $data = []): string
+function jsonOut(array $payload): string
 {
+    return json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+}
+
+function withQuery(string $url, array $params): string
+{
+    $sep = (strpos($url, '?') === false) ? '?' : '&';
+    return $url . $sep . http_build_query($params);
+}
+
+function httpRequest(string $method, string $url, array $data = []): array
+{
+    $started = microtime(true);
     $ch = curl_init();
 
     $options = [
         CURLOPT_URL => $url,
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_CONNECTTIMEOUT => 3,
-        CURLOPT_TIMEOUT => 6,
-        CURLOPT_TCP_KEEPALIVE => 1,
-        CURLOPT_USERAGENT => 'smartparking-mqtt-bridge/optimized',
+        CURLOPT_TIMEOUT => 7,
+        CURLOPT_NOSIGNAL => true,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_MAXREDIRS => 2,
     ];
 
     if (strtoupper($method) === 'POST') {
@@ -56,33 +64,40 @@ function httpRequest(string $method, string $url, array $data = []): string
 
     $response = curl_exec($ch);
     $error = curl_error($ch);
+    $errno = curl_errno($ch);
     $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
 
-    if ($error) {
-        throw new Exception('CURL: ' . $error);
+    $elapsedMs = (int) round((microtime(true) - $started) * 1000);
+
+    if ($response === false || $errno) {
+        throw new RuntimeException("HTTP {$method} gagal ({$errno}): {$error}");
     }
 
-    if ($httpCode >= 400) {
-        throw new Exception('HTTP ' . $httpCode . ' dari API: ' . substr((string)$response, 0, 200));
+    if ($httpCode >= 400 || $httpCode === 0) {
+        throw new RuntimeException("HTTP {$method} status {$httpCode}: " . substr((string)$response, 0, 200));
     }
 
-    return (string)$response;
+    return [
+        'body' => $response,
+        'http_code' => $httpCode,
+        'elapsed_ms' => $elapsedMs,
+    ];
 }
 
-function httpGet(string $url): string
+function httpGet(string $url): array
 {
     return httpRequest('GET', $url);
 }
 
-function httpPost(string $url, array $data): string
+function httpPost(string $url, array $data): array
 {
     return httpRequest('POST', $url, $data);
 }
 
 function publishJson(MqttClient $mqtt, string $topic, array $payload): void
 {
-    $mqtt->publish($topic, shortJson($payload), 0);
+    $mqtt->publish($topic, jsonOut($payload), 0);
 }
 
 function publishServerEvent(MqttClient $mqtt, string $event, array $extra = []): void
@@ -94,214 +109,236 @@ function publishServerEvent(MqttClient $mqtt, string $event, array $extra = []):
     ], $extra));
 }
 
+function publishGateResponse(MqttClient $mqtt, string $qrCode, string $gate, string $status, string $message, array $extra = []): void
+{
+    publishJson($mqtt, MQTT_TOPIC_GATE_RESPONSE, array_merge([
+        'qr_code' => $qrCode,
+        'gate' => $gate,
+        'status' => $status,
+        'message' => $message,
+        'time' => date('Y-m-d H:i:s'),
+        'source' => 'mqtt_bridge.php',
+    ], $extra));
+}
+
 function publishSlotStateFromApi(MqttClient $mqtt, string $apiBase): void
 {
-    $apiResponse = httpGet($apiBase . '?action=get_slots_admin&_=' . time());
-    $data = json_decode($apiResponse, true);
+    try {
+        // silent=1 agar api.php tidak membuat koneksi MQTT lagi. Bridge yang publish event.
+        $url = withQuery($apiBase, [
+            'action' => 'get_slots_admin',
+            'silent' => 1,
+            '_' => time(),
+        ]);
 
-    if (!is_array($data) || !isset($data['slots'])) {
-        echo "Gagal mengambil slot state dari API\n";
+        $res = httpGet($url);
+        $data = json_decode($res['body'], true);
+
+        if (!is_array($data) || !isset($data['slots'])) {
+            echo "Gagal mengambil slot state dari API\n";
+            return;
+        }
+
+        $slots = [];
+        foreach ($data['slots'] as $s) {
+            $state = $s['state'] ?? 'slot-free';
+
+            if ($state === 'slot-occupied') {
+                $status = 'terisi';
+                $terisi = true;
+            } elseif ($state === 'slot-reserved-admin') {
+                $status = 'reserved';
+                $terisi = false;
+            } else {
+                $status = 'kosong';
+                $terisi = false;
+            }
+
+            $slots[] = [
+                'slot_nomor' => (int)($s['slot_nomor'] ?? 0),
+                'terisi' => $terisi,
+                'status' => $status,
+                'user_data' => $s['user_data'] ?? null,
+            ];
+        }
+
+        publishJson($mqtt, MQTT_TOPIC_SLOT_STATE, [
+            'event' => 'slot_state',
+            'slots' => $slots,
+            'source' => 'mqtt_bridge.php',
+            'api_ms' => $res['elapsed_ms'],
+            'server_time' => date('c'),
+        ]);
+
+        echo "Publish slot state berhasil ({$res['elapsed_ms']} ms)\n";
+    } catch (Throwable $e) {
+        echo "Gagal publish slot state: " . $e->getMessage() . "\n";
+    }
+}
+
+function handleSlotStatus(MqttClient $mqtt, string $apiBase, array $payload): void
+{
+    global $lastSlotHash;
+
+    $s1 = isset($payload['s1']) ? (int)$payload['s1'] : 0;
+    $s2 = isset($payload['s2']) ? (int)$payload['s2'] : 0;
+    $s3 = isset($payload['s3']) ? (int)$payload['s3'] : 0;
+    $s4 = isset($payload['s4']) ? (int)$payload['s4'] : 0;
+
+    $hash = implode(',', [$s1, $s2, $s3, $s4]);
+    if ($hash === $lastSlotHash) {
+        echo "Slot status sama, skip API: {$hash}\n";
+        return;
+    }
+    $lastSlotHash = $hash;
+
+    $url = withQuery($apiBase, [
+        'action' => 'update_hardware_slots',
+        'silent' => 1,
+        's1' => $s1,
+        's2' => $s2,
+        's3' => $s3,
+        's4' => $s4,
+    ]);
+
+    $res = httpGet($url);
+    echo "Response API Slot ({$res['elapsed_ms']} ms): {$res['body']}\n";
+
+    publishSlotStateFromApi($mqtt, $apiBase);
+    publishServerEvent($mqtt, 'slot_hardware_updated', [
+        's1' => $s1,
+        's2' => $s2,
+        's3' => $s3,
+        's4' => $s4,
+        'api_ms' => $res['elapsed_ms'],
+    ]);
+}
+
+function handleGateScan(MqttClient $mqtt, string $apiBase, array $payload): void
+{
+    global $lastQrCache;
+
+    $qrCode = isset($payload['qr_code']) ? trim((string)$payload['qr_code']) : '';
+    $gate = isset($payload['gate']) ? strtolower(trim((string)$payload['gate'])) : '';
+
+    if ($qrCode === '' || !in_array($gate, ['in', 'out'], true)) {
+        echo "qr_code atau gate tidak valid\n";
+        publishGateResponse($mqtt, $qrCode, $gate, 'error', 'QR/gate tidak valid');
         return;
     }
 
-    $slots = [];
-    foreach ($data['slots'] as $s) {
-        $state = $s['state'] ?? 'slot-free';
-
-        if ($state === 'slot-occupied') {
-            $status = 'terisi';
-            $terisi = true;
-        } elseif ($state === 'slot-reserved-admin') {
-            $status = 'reserved';
-            $terisi = false;
-        } else {
-            $status = 'kosong';
-            $terisi = false;
-        }
-
-        $slots[] = [
-            'slot_nomor' => (int)($s['slot_nomor'] ?? 0),
-            'terisi' => $terisi,
-            'status' => $status,
-            'user_data' => $s['user_data'] ?? null,
-        ];
+    // Debounce scanner: GM65 kadang membaca QR sama beberapa kali sangat cepat.
+    $key = $qrCode . '|' . $gate;
+    $now = nowMs();
+    if (isset($lastQrCache[$key]) && ($now - $lastQrCache[$key] < 2500)) {
+        echo "Duplicate QR cepat, skip: {$key}\n";
+        return;
     }
+    $lastQrCache[$key] = $now;
 
-    publishJson($mqtt, MQTT_TOPIC_SLOT_STATE, [
-        'event' => 'slot_state',
-        'slots' => $slots,
-        'source' => 'mqtt_bridge.php',
-        'server_time' => date('c'),
-    ]);
+    try {
+        $res = httpPost(withQuery($apiBase, ['action' => 'gate_scan']), [
+            'qr_code' => $qrCode,
+            'gate' => $gate,
+            'silent' => 1, // penting: API tidak publish MQTT lagi, bridge yang publish agar tidak dobel dan tidak lambat.
+        ]);
 
-    echo "Publish slot state ke MQTT berhasil\n";
+        echo "Response API Gate ({$res['elapsed_ms']} ms): {$res['body']}\n";
+        $apiData = json_decode($res['body'], true);
+
+        publishGateResponse(
+            $mqtt,
+            $qrCode,
+            $gate,
+            $apiData['status'] ?? 'error',
+            $apiData['message'] ?? 'Response tidak valid',
+            ['api_ms' => $res['elapsed_ms']]
+        );
+
+        // Response gate sudah dikirim dulu. Setelah itu baru update dashboard.
+        publishSlotStateFromApi($mqtt, $apiBase);
+        publishServerEvent($mqtt, 'gate_scan_processed', [
+            'qr_code' => $qrCode,
+            'gate' => $gate,
+            'api_status' => $apiData['status'] ?? 'error',
+            'api_ms' => $res['elapsed_ms'],
+        ]);
+    } catch (Throwable $e) {
+        echo "Error Gate Scan: " . $e->getMessage() . "\n";
+        publishGateResponse($mqtt, $qrCode, $gate, 'error', 'Server timeout / API tidak merespons', [
+            'error' => $e->getMessage(),
+        ]);
+        publishServerEvent($mqtt, 'gate_scan_error', [
+            'qr_code' => $qrCode,
+            'gate' => $gate,
+            'error' => $e->getMessage(),
+        ]);
+    }
 }
 
-$clientId = 'php_bridge_' . uniqid('', true);
+$clientId = 'php_bridge_' . uniqid();
 $settings = (new ConnectionSettings())
     ->setUsername(MQTT_USER)
     ->setPassword(MQTT_PASS)
-    ->setUseTls(MQTT_USE_TLS)
-    ->setKeepAliveInterval(30)
-    ->setConnectTimeout(5);
+    ->setUseTls(defined('MQTT_USE_TLS') ? MQTT_USE_TLS : true)
+    ->setKeepAliveInterval(60)
+    ->setConnectTimeout(10);
 
 $mqtt = new MqttClient(MQTT_HOST, MQTT_PORT, $clientId, MqttClient::MQTT_3_1_1);
-
-// Cache ringan untuk mencegah proses berulang.
-$lastSlotHash = '';
-$lastSlotAt = 0.0;
-$lastScanHash = '';
-$lastScanAt = 0.0;
-
-$handler = function (string $topic, string $message) use ($mqtt, $apiBase, &$lastSlotHash, &$lastSlotAt, &$lastScanHash, &$lastScanAt) {
-    $allowedTopics = [
-        MQTT_TOPIC_SLOT_STATUS,
-        MQTT_TOPIC_GATE_SCAN,
-        MQTT_TOPIC_SLOT_REQUEST,
-    ];
-
-    // Pengaman jika nanti subscribe wildcard: abaikan pesan response/event dari bridge sendiri.
-    if (!in_array($topic, $allowedTopics, true)) {
-        return;
-    }
-
-    echo "\nTopic: {$topic}\n";
-    echo "Message: {$message}\n";
-
-    $payload = json_decode($message, true);
-    if (!is_array($payload)) {
-        echo "Payload bukan JSON valid\n";
-        return;
-    }
-
-    try {
-        // 1. STATUS SLOT DARI ESP32 / MQTTX
-        if ($topic === MQTT_TOPIC_SLOT_STATUS) {
-            $s1 = isset($payload['s1']) ? (int)$payload['s1'] : 0;
-            $s2 = isset($payload['s2']) ? (int)$payload['s2'] : 0;
-            $s3 = isset($payload['s3']) ? (int)$payload['s3'] : 0;
-            $s4 = isset($payload['s4']) ? (int)$payload['s4'] : 0;
-
-            $slotHash = "{$s1}{$s2}{$s3}{$s4}";
-            $nowMicro = microtime(true);
-
-            if ($slotHash === $lastSlotHash && ($nowMicro - $lastSlotAt) < 1.0) {
-                echo "Slot sama dalam <1 detik, diabaikan supaya tidak spam.\n";
-                return;
-            }
-
-            $lastSlotHash = $slotHash;
-            $lastSlotAt = $nowMicro;
-
-            $url = $apiBase . '?action=update_hardware_slots'
-                . '&s1=' . $s1
-                . '&s2=' . $s2
-                . '&s3=' . $s3
-                . '&s4=' . $s4;
-
-            $apiResponse = httpGet($url);
-            echo "Response API Slot: {$apiResponse}\n";
-
-            $apiData = json_decode($apiResponse, true) ?: [];
-            $changed = (int)($apiData['changed'] ?? 0);
-            $assigned = (int)($apiData['assigned_permanent_history'] ?? 0);
-
-            // Publish event hanya jika database benar-benar berubah.
-            if ($changed > 0 || $assigned > 0) {
-                publishServerEvent($mqtt, 'hardware_slot_updated', [
-                    's1' => $s1,
-                    's2' => $s2,
-                    's3' => $s3,
-                    's4' => $s4,
-                    'changed' => $changed,
-                    'assigned_permanent_history' => $assigned,
-                ]);
-            } else {
-                echo "Tidak ada perubahan slot, realtime event tidak dikirim.\n";
-            }
-
-            return;
-        }
-
-        // 2. SCAN QR RESERVASI / QR PERMANEN
-        if ($topic === MQTT_TOPIC_GATE_SCAN) {
-            $qrCode = isset($payload['qr_code']) ? trim((string)$payload['qr_code']) : '';
-            $gate = isset($payload['gate']) ? strtolower(trim((string)$payload['gate'])) : '';
-
-            if ($qrCode === '' || !in_array($gate, ['in', 'out'], true)) {
-                echo "qr_code kosong atau gate bukan in/out\n";
-                return;
-            }
-
-            $scanHash = sha1($qrCode . '|' . $gate);
-            $nowMicro = microtime(true);
-
-            if ($scanHash === $lastScanHash && ($nowMicro - $lastScanAt) < 2.0) {
-                echo "Scan QR dobel dalam <2 detik, diabaikan.\n";
-                return;
-            }
-
-            $lastScanHash = $scanHash;
-            $lastScanAt = $nowMicro;
-
-            $apiResponse = httpPost($apiBase . '?action=gate_scan', [
-                'qr_code' => $qrCode,
-                'gate' => $gate,
-            ]);
-
-            echo "Response API Gate: {$apiResponse}\n";
-            $apiData = json_decode($apiResponse, true) ?: [];
-
-            publishJson($mqtt, MQTT_TOPIC_GATE_RESPONSE, [
-                'qr_code' => $qrCode,
-                'gate' => $gate,
-                'status' => $apiData['status'] ?? 'error',
-                'message' => $apiData['message'] ?? 'Response tidak valid',
-                'server_time' => date('c'),
-            ]);
-
-            publishServerEvent($mqtt, 'gate_scan_processed', [
-                'qr_code' => $qrCode,
-                'gate' => $gate,
-                'api_status' => $apiData['status'] ?? 'error',
-            ]);
-
-            return;
-        }
-
-        // 3. REQUEST STATUS SLOT DARI ESP32 / MQTTX
-        if ($topic === MQTT_TOPIC_SLOT_REQUEST) {
-            publishSlotStateFromApi($mqtt, $apiBase);
-            publishServerEvent($mqtt, 'slot_state_requested', [
-                'request' => $payload['request'] ?? 'slot_state',
-            ]);
-            return;
-        }
-    } catch (Throwable $e) {
-        echo "Error proses data: " . $e->getMessage() . "\n";
-        publishJson($mqtt, 'smartparking/system/error', [
-            'error' => $e->getMessage(),
-            'topic' => $topic,
-            'server_time' => date('c'),
-        ]);
-    }
-};
 
 try {
     $mqtt->connect($settings, true);
     echo "Bridge PHP terhubung ke HiveMQ\n";
+    echo "API Base: {$apiBase}\n";
 
-    // Subscribe hanya topic input, bukan smartparking/#.
-    $mqtt->subscribe(MQTT_TOPIC_SLOT_STATUS, $handler, 0);
-    $mqtt->subscribe(MQTT_TOPIC_GATE_SCAN, $handler, 0);
-    $mqtt->subscribe(MQTT_TOPIC_SLOT_REQUEST, $handler, 0);
+    $callback = function ($topic, $message) use ($mqtt, $apiBase, $inputTopics) {
+        if (!in_array($topic, $inputTopics, true)) {
+            return;
+        }
 
-    echo "Subscribe topic input berhasil:\n";
-    echo "- " . MQTT_TOPIC_SLOT_STATUS . "\n";
-    echo "- " . MQTT_TOPIC_GATE_SCAN . "\n";
-    echo "- " . MQTT_TOPIC_SLOT_REQUEST . "\n";
+        echo "\nTopic: {$topic}\n";
+        echo "Message: {$message}\n";
+
+        $payload = json_decode($message, true);
+        if (!is_array($payload)) {
+            echo "Payload bukan JSON valid\n";
+            return;
+        }
+
+        try {
+            if ($topic === MQTT_TOPIC_SLOT_STATUS) {
+                handleSlotStatus($mqtt, $apiBase, $payload);
+                return;
+            }
+
+            if ($topic === MQTT_TOPIC_GATE_SCAN) {
+                handleGateScan($mqtt, $apiBase, $payload);
+                return;
+            }
+
+            if ($topic === MQTT_TOPIC_SLOT_REQUEST) {
+                publishSlotStateFromApi($mqtt, $apiBase);
+                publishServerEvent($mqtt, 'slot_state_requested', [
+                    'request' => $payload['request'] ?? 'slot_state',
+                ]);
+                return;
+            }
+        } catch (Throwable $e) {
+            echo "Error proses data: " . $e->getMessage() . "\n";
+            publishJson($mqtt, 'smartparking/system/error', [
+                'error' => $e->getMessage(),
+                'topic' => $topic,
+                'time' => date('Y-m-d H:i:s'),
+            ]);
+        }
+    };
+
+    foreach ($inputTopics as $t) {
+        $mqtt->subscribe($t, $callback, 0);
+        echo "Subscribe {$t} berhasil\n";
+    }
+
     echo "Menunggu data MQTT...\n";
-
     $mqtt->loop(true);
 } catch (Throwable $e) {
     echo "Gagal konek MQTT: " . $e->getMessage() . "\n";
