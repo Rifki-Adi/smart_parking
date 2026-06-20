@@ -62,7 +62,11 @@ $uid = $_SESSION['user_id'];
 <script>
     const USER_ID = "<?= $uid ?>";
 
+    let loadingTickets = false;
+
     async function fetchMyTickets() {
+        if (loadingTickets) return;
+        loadingTickets = true;
         try {
             let res = await fetch(`api.php?action=get_user_live_data&uid=${USER_ID}&_=${Date.now()}`);
             let data = await res.json();
@@ -120,7 +124,9 @@ $uid = $_SESSION['user_id'];
                 </div>`;
             });
             container.innerHTML = html;
-        } catch(e) {}
+        } catch(e) {} finally {
+            loadingTickets = false;
+        }
     }
     
     let localTicketTimer = null;
