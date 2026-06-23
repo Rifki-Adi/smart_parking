@@ -3,15 +3,12 @@ session_start();
 require 'db_config.php';
 date_default_timezone_set('Asia/Jakarta');
 
-// Helper redirect aman untuk Azure/XAMPP.
-// Biar kalau project berada di subfolder, arah redirect tetap benar.
+// Redirect aman untuk XAMPP dan Azure.
 function redirectPage($file) {
-    $base = rtrim(dirname($_SERVER['SCRIPT_NAME']), '/\');
-
-    if ($base === '/' || $base === '\' || $base === '.') {
+    $base = rtrim(dirname($_SERVER['SCRIPT_NAME']), '/\\');
+    if ($base === '/' || $base === '\\' || $base === '.') {
         $base = '';
     }
-
     header('Location: ' . $base . '/' . $file);
     exit;
 }
@@ -20,9 +17,9 @@ function redirectByRole($role) {
     if (strtolower((string)$role) === 'admin') {
         redirectPage('admin_dashboard.php');
     }
-
     redirectPage('dashboard.php');
 }
+
 
 // Jika sudah login, arahkan ke dashboard
 if (isset($_SESSION['user_id'])) {
@@ -90,7 +87,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     <p class="text-muted small">Silakan masuk ke akun Anda</p>
                 </div>
 
-                <form method="POST" action="./login.php" class="text-start">
+                <form method="POST" action="login.php" class="text-start">
                     <div class="mb-3">
                         <label class="small fw-bold text-muted mb-1">Email / No. HP</label>
                         <div class="input-group">
