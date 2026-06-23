@@ -7,12 +7,12 @@ date_default_timezone_set('Asia/Jakarta');
 // Mencegah error fatal jika session browser tersangkut sebagai ESP32
 if (isset($_SESSION['user_id']) && $_SESSION['user_id'] === 'esp32_device') {
     session_destroy();
-    header("Location: login.php");
+    header("Location: ./login.php");
     exit;
 }
 
-if (!isset($_SESSION['user_id'])) { header("Location: login.php"); exit; }
-if (isset($_SESSION['role']) && strtolower($_SESSION['role']) === 'admin') { header("Location: admin_dashboard.php"); exit; }
+if (!isset($_SESSION['user_id'])) { header("Location: ./login.php"); exit; }
+if (isset($_SESSION['role']) && strtolower($_SESSION['role']) === 'admin') { header("Location: ./admin_dashboard.php"); exit; }
 
 $uid = $_SESSION['user_id'];
 $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
@@ -154,7 +154,7 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://unpkg.com/paho-mqtt@1.1.0/paho-mqtt-min.js"></script>
 <script src="mqtt_browser_config.php"></script>
-<script src="js/mqtt_realtime.js"></script>
+<script src="mqtt_realtime.js"></script>
 
 <script>
     const USER_ID = "<?= $uid ?>";
@@ -163,9 +163,6 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
     let userSlotInterval = null;
     let userTimerInterval = null;
     let userTimeLeft = 0;
-    let loadingUserData = false;
-    let loadingSlots = false;
-    let loadingModalTrx = false;
 
     function formatCountdown(seconds) {
         seconds = Math.max(0, parseInt(seconds || 0));
@@ -201,8 +198,6 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
     }
 
     async function fetchUserLiveData() {
-        if (loadingUserData) return;
-        loadingUserData = true;
         try {
             let res = await fetch(`api.php?action=get_user_live_data&uid=${USER_ID}&_=${Date.now()}`);
             let data = await res.json();
@@ -214,14 +209,10 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
 
             userTimeLeft = parseInt(data.time_left || 0);
             updateUserCountdownDisplay();
-        } catch (e) {} finally {
-            loadingUserData = false;
-        }
+        } catch (e) {}
     }
 
     async function fetchLiveSlots() {
-        if (loadingSlots) return;
-        loadingSlots = true;
         try {
             const response = await fetch(`api.php?action=get_slots&uid=${USER_ID}&_=${Date.now()}`);
             const slots = await response.json();
@@ -253,22 +244,16 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
             });
 
             document.getElementById('slot-area-container').innerHTML = htmlContainer;
-        } catch (e) {} finally {
-            loadingSlots = false;
-        }
+        } catch (e) {}
     }
 
-    function refreshDashboardRealtime(info = {}) {
-        const eventName = (info && info.event) ? info.event : '';
+    function refreshDashboardRealtime(reason = '') {
+        fetchUserLiveData();
         fetchLiveSlots();
 
-        if (eventName !== 'slot_state' && eventName !== 'slot_hardware_updated') {
-            fetchUserLiveData();
-
-            const modalTrx = document.getElementById('modalTrx');
-            if (modalTrx && modalTrx.classList.contains('show')) {
-                fetchAndRenderLive();
-            }
+        const modalTrx = document.getElementById('modalTrx');
+        if (modalTrx && modalTrx.classList.contains('show')) {
+            fetchAndRenderLive();
         }
     }
 
@@ -396,15 +381,11 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
     });
     
     async function fetchAndRenderLive() {
-        if (loadingModalTrx) return;
-        loadingModalTrx = true;
         try {
             const response = await fetch(`api.php?action=get_user_trx&user_id=${USER_ID}&_=${Date.now()}`);
             globalTrxData = await response.json();
             renderTrxTable();
-        } catch (e) {} finally {
-            loadingModalTrx = false;
-        }
+        } catch (e) {}
     }
 
     function setSortTrx(colName) {
