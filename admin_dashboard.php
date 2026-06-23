@@ -7,12 +7,12 @@ date_default_timezone_set('Asia/Jakarta');
 // Mencegah error fatal jika session browser tersangkut sebagai ESP32
 if (isset($_SESSION['user_id']) && $_SESSION['user_id'] === 'esp32_device') {
     session_destroy();
-    header("Location: login.php");
+    header("Location: ./login.php");
     exit;
 }
 
 if (!isset($_SESSION['user_id']) || strtolower($_SESSION['role']) !== 'admin') { 
-    header("Location: dashboard.php"); 
+    header("Location: ./dashboard.php"); 
     exit; 
 }
 $uid_admin = $_SESSION['user_id'];
