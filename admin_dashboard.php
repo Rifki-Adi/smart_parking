@@ -24,7 +24,7 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Dashboard - Smart Parking</title>
+    <title> Dashboard - Smart Parking</title>
     <link rel="icon" href="logo 1.png" type="image/png">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -46,7 +46,7 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
     <div class="container">
         <a class="navbar-brand d-flex align-items-center" href="admin_dashboard.php">
             <img src="Logo.png" alt="Smart Parking Logo" style="height: 80px; width: auto;" class="me-3">
-            <span class="badge bg-danger fs-6 shadow-sm"><i class="fas fa-user-shield me-1"></i> ADMIN: <?= htmlspecialchars($admin_name) ?></span>
+            <span class="badge bg-danger fs-6 shadow-sm"><i class="fas fa-user-shield me-1"></i> Pengelola Parkir: <?= htmlspecialchars($admin_name) ?></span>
         </a>
         <button class="navbar-toggler border-0" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
             <span class="navbar-toggler-icon"></span>
