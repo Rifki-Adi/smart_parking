@@ -3,11 +3,30 @@ session_start();
 require 'db_config.php';
 date_default_timezone_set('Asia/Jakarta');
 
+// Helper redirect aman untuk Azure/XAMPP.
+// Biar kalau project berada di subfolder, arah redirect tetap benar.
+function redirectPage($file) {
+    $base = rtrim(dirname($_SERVER['SCRIPT_NAME']), '/\');
+
+    if ($base === '/' || $base === '\' || $base === '.') {
+        $base = '';
+    }
+
+    header('Location: ' . $base . '/' . $file);
+    exit;
+}
+
+function redirectByRole($role) {
+    if (strtolower((string)$role) === 'admin') {
+        redirectPage('admin_dashboard.php');
+    }
+
+    redirectPage('dashboard.php');
+}
+
 // Jika sudah login, arahkan ke dashboard
 if (isset($_SESSION['user_id'])) {
-    if ($_SESSION['role'] == 'admin') { header("Location: admin_dashboard.php"); } 
-    else { header("Location: dashboard.php"); }
-    exit;
+    redirectByRole($_SESSION['role'] ?? 'user');
 }
 
 $error_msg = '';
@@ -25,12 +44,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             $_SESSION['user_id'] = $user['id'];
             $_SESSION['role']    = strtolower($user['role']);
             
-            if (strtolower($user['role']) === 'admin') {
-                header("Location: admin_dashboard.php");
-            } else {
-                header("Location: dashboard.php");
-            }
-            exit;
+            redirectByRole($user['role']);
         } else {
             $stmt_fallback = $conn->prepare("SELECT * FROM profiles WHERE (nama = ? OR plat_nomor = ?) AND password = ?");
             $stmt_fallback->execute([$login_id, $login_id, $password]);
@@ -39,12 +53,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             if ($user_fallback) {
                 $_SESSION['user_id'] = $user_fallback['id'];
                 $_SESSION['role']    = strtolower($user_fallback['role']);
-                if (strtolower($user_fallback['role']) === 'admin') {
-                    header("Location: admin_dashboard.php");
-                } else {
-                    header("Location: dashboard.php");
-                }
-                exit;
+                redirectByRole($user_fallback['role']);
             }
 
             $error_msg = "Akun tidak ditemukan atau Kata Sandi salah!";
@@ -81,7 +90,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     <p class="text-muted small">Silakan masuk ke akun Anda</p>
                 </div>
 
-                <form method="POST" action="login.php" class="text-start">
+                <form method="POST" action="./login.php" class="text-start">
                     <div class="mb-3">
                         <label class="small fw-bold text-muted mb-1">Email / No. HP</label>
                         <div class="input-group">
@@ -148,4 +157,3 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 </script>
 </body>
 </html>
-
