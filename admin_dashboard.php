@@ -1,7 +1,9 @@
 <?php
 session_start();
 require 'db_config.php';
-require_once 'mqtt_config.php';
+if (file_exists(__DIR__ . '/mqtt_config.php')) {
+    require_once __DIR__ . '/mqtt_config.php';
+}
 date_default_timezone_set('Asia/Jakarta');
 
 // Mencegah error fatal jika session browser tersangkut sebagai ESP32
