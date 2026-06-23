@@ -24,7 +24,7 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pengelola Parkir Dashboard - Smart Parking</title>
+    <title>Dashboard Pengelola Parkir - Smart Parking</title>
     <link rel="icon" href="logo 1.png" type="image/png">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -46,15 +46,15 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
     <div class="container">
         <a class="navbar-brand d-flex align-items-center" href="admin_dashboard.php">
             <img src="Logo.png" alt="Smart Parking Logo" style="height: 80px; width: auto;" class="me-3">
-            <span class="badge bg-danger fs-6 shadow-sm"><i class="fas fa-user-shield me-1"></i> Pengelola Parkir: <?= htmlspecialchars($admin_name) ?></span>
+            <span class="badge bg-danger fs-6 shadow-sm"><i class="fas fa-user-tie me-1"></i> Pengelola Parkir: <?= htmlspecialchars($admin_name) ?></span>
         </a>
         <button class="navbar-toggler border-0" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
             <span class="navbar-toggler-icon"></span>
         </button>
         <div class="collapse navbar-collapse" id="navbarNav">
             <ul class="navbar-nav ms-auto align-items-center">
-                <li class="nav-item"><a class="nav-link active fw-bold" style="color: var(--primary-color);" href="admin_dashboard.php"><i class="fas fa-desktop me-1"></i> Monitor</a></li>
-                <li class="nav-item"><a class="nav-link fw-bold" href="admin_users.php"><i class="fas fa-users me-1"></i> Pengguna</a></li>
+                <li class="nav-item"><a class="nav-link active fw-bold" style="color: var(--primary-color);" href="admin_dashboard.php"><i class="fas fa-desktop me-1"></i> Monitor Parkir</a></li>
+                <li class="nav-item"><a class="nav-link fw-bold" href="admin_users.php"><i class="fas fa-users me-1"></i> Data Pengguna</a></li>
                 <li class="nav-item ms-3"><a class="btn btn-outline-danger btn-sm rounded-pill px-4 fw-bold" href="logout.php">Keluar</a></li>
             </ul>
         </div>
@@ -71,8 +71,8 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
         <div class="col-lg-12">
             <div class="card card-custom p-4 border-0 mb-4">
                 <div class="d-flex justify-content-between align-items-center mb-4">
-                    <h5 id="header-kapasitas" class="fw-bold mb-0" style="color: var(--primary-color);">Live Slot Monitor (Memuat...)</h5>
-                    <span class="badge bg-success bg-opacity-10 text-success border border-success px-3 py-2"><i class="fas fa-sync-alt fa-spin me-1"></i> Live Auto-Sync</span>
+                    <h5 id="header-kapasitas" class="fw-bold mb-0" style="color: var(--primary-color);">Monitoring Slot Parkir (Memuat...)</h5>
+                    <span class="badge bg-success bg-opacity-10 text-success border border-success px-3 py-2"><i class="fas fa-sync-alt fa-spin me-1"></i> Realtime</span>
                 </div>
                 
                 <div class="row g-3 row-cols-2 row-cols-md-4" id="slot-area-container">
@@ -139,7 +139,7 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
         try {
             const res = await fetch(`api.php?action=get_slots_admin&_=${Date.now()}`);
             const data = await res.json();
-            document.getElementById('header-kapasitas').innerText = `Live Slot Monitor (Terisi: ${data.terpakai} / ${data.total})`;
+            document.getElementById('header-kapasitas').innerText = `Monitoring Slot Parkir (Terisi: ${data.terpakai} / ${data.total})`;
             let htmlContainer = '';
             data.slots.forEach(slot => {
                 let innerHtml = `<i class="fas fa-car fa-2x mb-1 car-icon"></i><h6 class="fw-bold mb-0">Slot ${slot.slot_nomor}</h6>`;
