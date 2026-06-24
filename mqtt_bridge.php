@@ -21,7 +21,14 @@ $inputTopics = [
 ];
 
 $lastSlotHash = null;
+$lastSlotProcessMs = 0;
+$lastSlotStatePublishMs = 0;
 $lastQrCache = []; // key => unix_ms
+
+// Anti lag: slot/status sering berubah karena sensor IR flicker.
+// Bridge hanya kirim ke API jika status stabil/berubah dan tidak terlalu cepat.
+const SLOT_API_MIN_INTERVAL_MS = 2500;
+const SLOT_STATE_REQUEST_MIN_INTERVAL_MS = 3000;
 
 function nowMs(): int
 {
@@ -48,7 +55,7 @@ function httpRequest(string $method, string $url, array $data = []): array
         CURLOPT_URL => $url,
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_CONNECTTIMEOUT => 3,
-        CURLOPT_TIMEOUT => 7,
+        CURLOPT_TIMEOUT => 6,
         CURLOPT_NOSIGNAL => true,
         CURLOPT_FOLLOWLOCATION => true,
         CURLOPT_MAXREDIRS => 2,
@@ -178,7 +185,7 @@ function publishSlotStateFromApi(MqttClient $mqtt, string $apiBase): void
 
 function handleSlotStatus(MqttClient $mqtt, string $apiBase, array $payload): void
 {
-    global $lastSlotHash;
+    global $lastSlotHash, $lastSlotProcessMs;
 
     $s1 = isset($payload['s1']) ? (int)$payload['s1'] : 0;
     $s2 = isset($payload['s2']) ? (int)$payload['s2'] : 0;
@@ -186,11 +193,20 @@ function handleSlotStatus(MqttClient $mqtt, string $apiBase, array $payload): vo
     $s4 = isset($payload['s4']) ? (int)$payload['s4'] : 0;
 
     $hash = implode(',', [$s1, $s2, $s3, $s4]);
+    $now = nowMs();
+
     if ($hash === $lastSlotHash) {
         echo "Slot status sama, skip API: {$hash}\n";
         return;
     }
+
+    if (($now - $lastSlotProcessMs) < SLOT_API_MIN_INTERVAL_MS) {
+        echo "Slot status terlalu cepat, skip agar server tidak lag: {$hash}\n";
+        return;
+    }
+
     $lastSlotHash = $hash;
+    $lastSlotProcessMs = $now;
 
     $url = withQuery($apiBase, [
         'action' => 'update_hardware_slots',
@@ -204,7 +220,8 @@ function handleSlotStatus(MqttClient $mqtt, string $apiBase, array $payload): vo
     $res = httpGet($url);
     echo "Response API Slot ({$res['elapsed_ms']} ms): {$res['body']}\n";
 
-    publishSlotStateFromApi($mqtt, $apiBase);
+    // Penting untuk anti lag: setelah update slot, bridge tidak langsung ambil get_slots_admin.
+    // Dashboard akan refresh sendiri setelah menerima server/event.
     publishServerEvent($mqtt, 'slot_hardware_updated', [
         's1' => $s1,
         's2' => $s2,
@@ -230,7 +247,7 @@ function handleGateScan(MqttClient $mqtt, string $apiBase, array $payload): void
     // Debounce scanner: GM65 kadang membaca QR sama beberapa kali sangat cepat.
     $key = $qrCode . '|' . $gate;
     $now = nowMs();
-    if (isset($lastQrCache[$key]) && ($now - $lastQrCache[$key] < 2500)) {
+    if (isset($lastQrCache[$key]) && ($now - $lastQrCache[$key] < 3500)) {
         echo "Duplicate QR cepat, skip: {$key}\n";
         return;
     }
@@ -255,8 +272,8 @@ function handleGateScan(MqttClient $mqtt, string $apiBase, array $payload): void
             ['api_ms' => $res['elapsed_ms']]
         );
 
-        // Response gate sudah dikirim dulu. Setelah itu baru update dashboard.
-        publishSlotStateFromApi($mqtt, $apiBase);
+        // Response gate sudah dikirim dulu. Jangan langsung ambil slot_state di sini,
+        // supaya bridge tidak tertahan dan ESP32 tidak timeout.
         publishServerEvent($mqtt, 'gate_scan_processed', [
             'qr_code' => $qrCode,
             'gate' => $gate,
@@ -317,10 +334,17 @@ try {
             }
 
             if ($topic === MQTT_TOPIC_SLOT_REQUEST) {
-                publishSlotStateFromApi($mqtt, $apiBase);
-                publishServerEvent($mqtt, 'slot_state_requested', [
-                    'request' => $payload['request'] ?? 'slot_state',
-                ]);
+                global $lastSlotStatePublishMs;
+                $now = nowMs();
+                if (($now - $lastSlotStatePublishMs) >= SLOT_STATE_REQUEST_MIN_INTERVAL_MS) {
+                    $lastSlotStatePublishMs = $now;
+                    publishSlotStateFromApi($mqtt, $apiBase);
+                    publishServerEvent($mqtt, 'slot_state_requested', [
+                        'request' => $payload['request'] ?? 'slot_state',
+                    ]);
+                } else {
+                    echo "Slot request terlalu cepat, skip get_slots_admin agar tidak lag\n";
+                }
                 return;
             }
         } catch (Throwable $e) {
