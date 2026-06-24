@@ -100,7 +100,7 @@ $users = $stmt_users->fetchAll();
     <div class="container">
         <a class="navbar-brand d-flex align-items-center" href="admin_dashboard.php">
             <img src="logo 1.png" alt="Smart Parking Logo" style="height: 80px; width: auto;" class="me-3">
-            <span class="badge bg-danger fs-6 shadow-sm"><i class="fas fa-user-shield me-1"></i> ADMIN: <?= htmlspecialchars($admin_name) ?></span>
+            <span class="badge bg-danger fs-6 shadow-sm"><i class="fas fa-user-shield me-1"></i> Pengelola Parkir: <?= htmlspecialchars($admin_name) ?></span>
         </a>
         <button class="navbar-toggler border-0" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
             <span class="navbar-toggler-icon"></span>
