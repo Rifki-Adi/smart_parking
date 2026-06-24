@@ -55,8 +55,8 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
         </button>
         <div class="collapse navbar-collapse" id="navbarNav">
             <ul class="navbar-nav ms-auto align-items-center">
-                <li class="nav-item"><a class="nav-link active fw-bold" style="color: var(--primary-color);" href="admin_dashboard.php"><i class="fas fa-desktop me-1"></i> Monitor Parkir</a></li>
-                <li class="nav-item"><a class="nav-link fw-bold" href="admin_users.php"><i class="fas fa-users me-1"></i> Data Pengguna</a></li>
+                <li class="nav-item"><a class="nav-link active fw-bold" style="color: var(--primary-color);" href="admin_dashboard.php"><i class="fas fa-desktop me-1"></i> Monitor</a></li>
+                <li class="nav-item"><a class="nav-link fw-bold" href="admin_users.php"><i class="fas fa-users me-1"></i> Pengguna</a></li>
                 <li class="nav-item ms-3"><a class="btn btn-outline-danger btn-sm rounded-pill px-4 fw-bold" href="logout.php">Keluar</a></li>
             </ul>
         </div>
