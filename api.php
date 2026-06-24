@@ -337,14 +337,29 @@ function assignRiwayatPermanenKeSlotBaru($conn, $slot_id) {
     return false;
 }
 
+function kosongkanSlotJikaAda($conn, $slot_id) {
+    if ($slot_id === null || $slot_id === '' || (int)$slot_id <= 0) {
+        return false;
+    }
+
+    $stmt = $conn->prepare("UPDATE slot SET terisi = false WHERE id = ?");
+    $stmt->execute([(int)$slot_id]);
+    return $stmt->rowCount() > 0;
+}
+
 // Ambil action lebih awal
 $action = isset($_GET['action']) ? $_GET['action'] : '';
 $expiredAt = date('Y-m-d H:i:s', time() - 60);
 
 // Jalankan cleanup hanya di action yang berkaitan dengan slot/tiket.
 // Jangan dijalankan di get_dashboard_data supaya dashboard admin tidak berat.
+// Cleanup jangan dijalankan saat request gate_scan dari mqtt_bridge.php (silent=1),
+// karena proses gate harus dibalas cepat ke ESP32 agar LCD tidak menampilkan Server Timeout.
+// Validasi expired tetap aman karena query QR reservasi sudah mengecek created_at >= $expiredAt.
 if (in_array($action, ['book_slot', 'get_slots', 'get_slots_admin', 'get_user_live_data', 'gate_scan', 'cancel_booking'])) {
-    cleanupExpiredReservations($conn);
+    if (!($action === 'gate_scan' && isSilentRealtimeRequest())) {
+        cleanupExpiredReservations($conn);
+    }
 }
 
 
@@ -651,7 +666,7 @@ if ($action == 'gate_scan') {
                     $conn->query("UPDATE profiles SET saldo = saldo - 3000 WHERE id = '$uid'");
                     $conn->prepare("INSERT INTO transaksi (user_id, tipe, jumlah, keterangan) VALUES (?, 'checkout', 3000, 'Keluar / Check-Out (Pembayaran Biaya Parkir)')")->execute([$uid]);
                     $conn->query("UPDATE reservasi SET status = 'selesai' WHERE id = " . $booking['id']);
-                    $conn->query("UPDATE slot SET terisi = 'false' WHERE id = " . $booking['slot_id']);
+                    kosongkanSlotJikaAda($conn, $booking['slot_id']);
 
                     catatRiwayatSlotReservasiSelesaiWajib(
                         $conn,
@@ -693,7 +708,7 @@ if ($action == 'gate_scan') {
                     $conn->query("UPDATE profiles SET saldo = saldo - 3000 WHERE id = '$uid'");
                     $conn->prepare("INSERT INTO transaksi (user_id, tipe, jumlah, keterangan) VALUES (?, 'checkout', 3000, 'Keluar / Check-Out (Pembayaran Biaya Parkir)')")->execute([$uid]);
                     $conn->query("UPDATE reservasi SET status = 'selesai' WHERE id = " . $cek_in['id']);
-                    $conn->query("UPDATE slot SET terisi = 'false' WHERE id = " . $cek_in['slot_id']);
+                    kosongkanSlotJikaAda($conn, $cek_in['slot_id']);
 
                     if (strpos($cek_in['kode_booking'], 'PK-') === 0) {
                         catatRiwayatSlotReservasiSelesaiWajib(
@@ -743,14 +758,14 @@ if ($action == 'gate_scan') {
                         $riwayat_permanen['id'],
                         'Check-out melalui QR permanen ' . $qr
                     );
-                    $conn->query("UPDATE slot SET terisi = 'false' WHERE id = " . $riwayat_permanen['slot_id']);
+                    kosongkanSlotJikaAda($conn, $riwayat_permanen['slot_id']);
                     $conn->commit();
 
                     publishRealtimeSafe($conn, 'gate_checkout_permanent', [
                         'user_id' => $uid,
                         'qr_code' => $qr,
                         'gate' => $gate,
-                        'slot_id' => (int)$riwayat_permanen['slot_id']
+                        'slot_id' => !empty($riwayat_permanen['slot_id']) ? (int)$riwayat_permanen['slot_id'] : null
                     ]);
 
                     echo json_encode(['status' => 'success', 'message' => 'Check-out Berhasil|Saldo -Rp 3.000']); exit;
@@ -816,7 +831,12 @@ if ($action == 'gate_scan') {
         }
     } catch (Exception $e) {
         if ($conn->inTransaction()) { $conn->rollBack(); }
-        echo json_encode(['status' => 'error', 'message' => 'Kesalahan Sistem|Hubungi Admin']); exit;
+        error_log('[gate_scan] ' . $e->getMessage());
+        $res = ['status' => 'error', 'message' => 'Kesalahan Sistem|Hubungi Admin'];
+        if (isset($_GET['debug']) && $_GET['debug'] == '1') {
+            $res['debug'] = $e->getMessage();
+        }
+        echo json_encode($res); exit;
     }
 }
 
