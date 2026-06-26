@@ -800,7 +800,23 @@ if ($action == 'gate_scan') {
                     )
                 ")->fetchColumn();
 
-                if ((int)$slot_tersedia <= 0) { echo json_encode(['status' => 'error', 'message' => 'Mohon Maaf...|Parkir Penuh']); exit; }
+                // Tambahan proteksi kapasitas:
+                // Jika ada QR permanen yang sudah masuk tetapi slot_id belum terisi oleh IR,
+                // tetap dianggap memakai kapasitas parkir agar gerbang tidak terbuka saat penuh.
+                $permanen_menunggu_slot = $conn->query("
+                    SELECT COUNT(*)
+                    FROM riwayat_slot
+                    WHERE status = 'aktif'
+                    AND tipe_akses = 'permanen'
+                    AND slot_id IS NULL
+                ")->fetchColumn();
+
+                $slot_tersedia_real = (int)$slot_tersedia - (int)$permanen_menunggu_slot;
+
+                if ($slot_tersedia_real <= 0) {
+                    echo json_encode(['status' => 'error', 'message' => 'Mohon Maaf...|Parkir Penuh']);
+                    exit;
+                }
                 
                 if ($user['saldo'] < 3000) { echo json_encode(['status' => 'error', 'message' => 'Saldo Tdk Cukup!|Min. Rp 3.000']); exit; }
                 
