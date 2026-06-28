@@ -303,7 +303,7 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
     async function bookingSlot(nomor) {
         const result = await Swal.fire({
             title: `Reservasi Slot ${nomor}?`,
-            html: `Biaya reservasi <b>Rp 5.000</b>.<br><small class="text-danger fw-bold mt-2 d-block"><i class="fas fa-exclamation-circle me-1"></i> Reservasi hangus otomatis dlm 1 menit.</small>`,
+            html: `Biaya reservasi <b>Rp 5.000</b>.<br><small class="text-danger fw-bold mt-2 d-block"><i class="fas fa-exclamation-circle me-1"></i> Reservasi hangus otomatis dalam 5 menit.</small>`,
             icon: 'question',
             showCancelButton: true,
             confirmButtonColor: '#1a365d',
