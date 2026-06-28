@@ -7,7 +7,7 @@ try {
     WITH expired AS (
         DELETE FROM reservasi
         WHERE status = 'pending'
-        AND created_at < (NOW() - INTERVAL '60 seconds')
+        AND created_at < (NOW() - INTERVAL '300 seconds')
         RETURNING user_id, kode_booking
     )
     INSERT INTO transaksi (user_id, tipe, jumlah, keterangan)
