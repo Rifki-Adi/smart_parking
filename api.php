@@ -12,6 +12,9 @@ if (file_exists(__DIR__ . '/mqtt_helper.php')) {
 
 date_default_timezone_set('Asia/Jakarta');
 
+// Auto release reservasi: 5 menit = 300 detik
+const AUTO_RELEASE_SECONDS = 300;
+
 header('Content-Type: application/json');
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 
@@ -24,12 +27,12 @@ function isSilentRealtimeRequest(): bool {
 
 // =============================================
 // CLEANUP OTOMATIS RESERVASI EXPIRED
-// Pending lebih dari 60 detik akan dihapus,
+// Pending lebih dari 5 menit akan dihapus,
 // sehingga slot otomatis kembali tersedia.
 // =============================================
 function cleanupExpiredReservations($conn) {
     try {
-        $expiredAt = date('Y-m-d H:i:s', time() - 60);
+        $expiredAt = date('Y-m-d H:i:s', time() - AUTO_RELEASE_SECONDS);
 
         $stmt = $conn->prepare("
             WITH expired AS (
@@ -349,7 +352,7 @@ function kosongkanSlotJikaAda($conn, $slot_id) {
 
 // Ambil action lebih awal
 $action = isset($_GET['action']) ? $_GET['action'] : '';
-$expiredAt = date('Y-m-d H:i:s', time() - 60);
+$expiredAt = date('Y-m-d H:i:s', time() - AUTO_RELEASE_SECONDS);
 
 // Jalankan cleanup hanya di action yang berkaitan dengan slot/tiket.
 // Jangan dijalankan di get_dashboard_data supaya dashboard admin tidak berat.
@@ -394,13 +397,13 @@ if ($action == 'book_slot') {
     $user_saldo = $conn->query("SELECT saldo FROM profiles WHERE id = '$uid'")->fetchColumn();
     if ($user_saldo < 8000) { echo json_encode(['status' => 'error', 'message' => 'Saldo Anda tidak cukup (Min. Rp 8.000: 5rb Booking + 3rb Gerbang). Silakan Top Up.']); exit; }
     
-    $stmt_cek = $conn->prepare("SELECT id FROM reservasi WHERE user_id = ? AND (status = 'check-in' OR (status = 'pending' AND created_at >= (NOW() - INTERVAL '60 seconds')))");
+    $stmt_cek = $conn->prepare("SELECT id FROM reservasi WHERE user_id = ? AND (status = 'check-in' OR (status = 'pending' AND created_at >= (NOW() - INTERVAL '300 seconds')))");
     $stmt_cek->execute([$uid]);
     if ($stmt_cek->fetch()) { echo json_encode(['status' => 'error', 'message' => 'Anda sudah memiliki tiket aktif atau sedang parkir!']); exit; }
     
     $slot = $conn->query("SELECT id FROM slot WHERE slot_nomor = '$slot_nomor'")->fetch();
     
-    $stmt_cek_slot = $conn->prepare("SELECT id FROM reservasi WHERE slot_id = ? AND (status = 'check-in' OR (status = 'pending' AND created_at >= (NOW() - INTERVAL '60 seconds')))");
+    $stmt_cek_slot = $conn->prepare("SELECT id FROM reservasi WHERE slot_id = ? AND (status = 'check-in' OR (status = 'pending' AND created_at >= (NOW() - INTERVAL '300 seconds')))");
     $stmt_cek_slot->execute([$slot['id']]);
     if ($stmt_cek_slot->fetch()) { 
         echo json_encode(['status' => 'error', 'message' => 'Mohon maaf, slot ini baru saja diambil oleh kendaraan di lokasi.']); 
@@ -589,7 +592,7 @@ if ($action == 'get_slots_admin') {
             $ri = $info_map[$s['id']];
             if ($ri['status'] == 'pending') {
                 $state = 'slot-reserved-admin';
-                $sisa = 60 - (strtotime(date('Y-m-d H:i:s')) - strtotime(substr($ri['created_at'], 0, 19)));
+                $sisa = AUTO_RELEASE_SECONDS - (strtotime(date('Y-m-d H:i:s')) - strtotime(substr($ri['created_at'], 0, 19)));
                 if ($sisa < 0) $sisa = 0;
                 $user_data = ['nama' => htmlspecialchars($ri['nama']), 'plat_nomor' => htmlspecialchars($ri['plat_nomor']), 'sisa_waktu' => $sisa, 'is_parkir' => false, 'status' => 'pending'];
             } else {
@@ -778,7 +781,7 @@ if ($action == 'gate_scan') {
                 }
 
                 // 4) Gate in QR permanen tanpa reservasi.
-                $punya_pending = $conn->query("SELECT id FROM reservasi WHERE user_id = '$uid' AND status = 'pending' AND created_at >= (NOW() - INTERVAL '60 seconds')")->fetch();
+                $punya_pending = $conn->query("SELECT id FROM reservasi WHERE user_id = '$uid' AND status = 'pending' AND created_at >= (NOW() - INTERVAL '300 seconds')")->fetch();
                 if ($punya_pending) { echo json_encode(['status' => 'error', 'message' => 'Punya Tiket Aktif!|Gunakan QR Aplikasi']); exit; }
 
                 // Saat scan QR permanen di gerbang, sistem belum tahu mobil akan parkir di slot fisik nomor berapa.
@@ -791,7 +794,7 @@ if ($action == 'gate_scan') {
                     AND id NOT IN (
                         SELECT slot_id FROM reservasi
                         WHERE status = 'check-in'
-                           OR (status = 'pending' AND created_at >= (NOW() - INTERVAL '60 seconds'))
+                           OR (status = 'pending' AND created_at >= (NOW() - INTERVAL '300 seconds'))
                     )
                     AND id NOT IN (
                         SELECT slot_id FROM riwayat_slot
@@ -866,7 +869,7 @@ if ($action == 'get_user_live_data') {
     $my_res = $stmt_my_res->fetch(PDO::FETCH_ASSOC);
     $time_left = 0; $has_pending = false;
     if ($my_res && !empty($my_res['created_at'])) {
-        $clean_date = substr($my_res['created_at'], 0, 19); $elapsed = time() - strtotime($clean_date); $time_left = 60 - $elapsed;
+        $clean_date = substr($my_res['created_at'], 0, 19); $elapsed = time() - strtotime($clean_date); $time_left = AUTO_RELEASE_SECONDS - $elapsed;
         if ($time_left < 0) $time_left = 0; $has_pending = true;
     }
     $tiket_aktif = $conn->prepare("SELECT r.*, s.slot_nomor FROM reservasi r JOIN slot s ON r.slot_id = s.id WHERE r.user_id = ? AND (r.status = 'check-in' OR (r.status = 'pending' AND r.created_at >= ?)) ORDER BY r.created_at DESC");
