@@ -77,6 +77,16 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
                     <span class="badge bg-success bg-opacity-10 text-success border border-success px-3 py-2"><i class="fas fa-sync-alt fa-spin me-1"></i> Realtime</span>
                 </div>
                 
+                <div id="admin-parking-full-alert" class="parking-full-alert d-none mb-3" role="alert" aria-live="polite">
+                    <div class="d-flex align-items-center gap-3 position-relative" style="z-index:1;">
+                        <span class="full-icon flex-shrink-0"><i class="fas fa-ban"></i></span>
+                        <div>
+                            <div class="full-title">SLOT PARKIR PENUH</div>
+                            <div class="full-subtitle">Kapasitas parkir sudah penuh. Sistem akan menolak QR gate masuk dan palang prototype tetap tertutup.</div>
+                        </div>
+                    </div>
+                </div>
+                
                 <div class="row g-3 row-cols-2 row-cols-md-4" id="slot-area-container">
                     <div class="col-12 text-center py-4 text-muted"><i class="fas fa-circle-notch fa-spin fa-2x mb-2"></i><br>Menghubungkan ke server...</div>
                 </div>
@@ -134,14 +144,26 @@ $admin_name = $conn->query("SELECT nama FROM profiles WHERE id = '$uid_admin'")-
 <script src="https://unpkg.com/paho-mqtt@1.1.0/paho-mqtt-min.js"></script>
 <script src="mqtt_browser_config.php"></script>
 <script src="js/mqtt_realtime.js"></script>
+<script src="js/parking_full_notice.js"></script>
 <script>
+
+    function setAdminParkingFullNotice(isFull, terpakai = 0, total = 0) {
+        if (window.ParkingFullNotice) {
+            window.ParkingFullNotice.setAdmin(isFull, terpakai, total);
+        }
+    }
+
     async function fetchLiveAdminSlots() {
         if (loadingAdminSlots) return;
         loadingAdminSlots = true;
         try {
             const res = await fetch(`api.php?action=get_slots_admin&_=${Date.now()}`);
             const data = await res.json();
-            document.getElementById('header-kapasitas').innerText = `Monitoring Slot Parkir (Terisi: ${data.terpakai} / ${data.total})`;
+            const terpakai = parseInt(data.terpakai || 0);
+            const totalSlot = parseInt(data.total || 0);
+            const isParkingFull = totalSlot > 0 && terpakai >= totalSlot;
+            document.getElementById('header-kapasitas').innerText = `Monitoring Slot Parkir (Terisi: ${terpakai} / ${totalSlot})`;
+            setAdminParkingFullNotice(isParkingFull, terpakai, totalSlot);
             let htmlContainer = '';
             data.slots.forEach(slot => {
                 let innerHtml = `<i class="fas fa-car fa-2x mb-1 car-icon"></i><h6 class="fw-bold mb-0">Slot ${slot.slot_nomor}</h6>`;
