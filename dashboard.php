@@ -105,6 +105,16 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
                     <i class="fas fa-circle text-danger me-1"></i> Terisi
                 </div>
                 
+                <div id="parking-full-alert" class="parking-full-alert d-none mb-3" role="alert" aria-live="polite">
+                    <div class="d-flex align-items-center gap-3 position-relative" style="z-index:1;">
+                        <span class="full-icon flex-shrink-0"><i class="fas fa-triangle-exclamation"></i></span>
+                        <div>
+                            <div class="full-title">SLOT PARKIR PENUH</div>
+                            <div class="full-subtitle">Seluruh slot sedang terisi atau masih reserved. Silakan tunggu sampai ada slot kosong.</div>
+                        </div>
+                    </div>
+                </div>
+                
                 <div class="row g-3 row-cols-2 row-cols-md-4" id="slot-area-container">
                     <div class="col-12 text-center py-3 text-muted"><i class="fas fa-circle-notch fa-spin me-2"></i>Memuat Area Parkir...</div>
                 </div>
@@ -157,6 +167,7 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
 <script src="https://unpkg.com/paho-mqtt@1.1.0/paho-mqtt-min.js"></script>
 <script src="mqtt_browser_config.php"></script>
 <script src="js/mqtt_realtime.js"></script>
+<script src="js/parking_full_notice.js"></script>
 
 <script>
     const USER_ID = "<?= $uid ?>";
@@ -214,12 +225,22 @@ $u = $conn->query("SELECT * FROM profiles WHERE id = '$uid'")->fetch();
         } catch (e) {}
     }
 
+
+    function setUserParkingFullNotice(isFull) {
+        if (window.ParkingFullNotice) {
+            window.ParkingFullNotice.setUser(isFull);
+        }
+    }
+
     async function fetchLiveSlots() {
         try {
             const response = await fetch(`api.php?action=get_slots&uid=${USER_ID}&_=${Date.now()}`);
             const slots = await response.json();
             
             let htmlContainer = '';
+
+            const isParkingFull = Array.isArray(slots) && slots.length > 0 && slots.every(slot => slot.state !== 'kosong');
+            setUserParkingFullNotice(isParkingFull);
 
             slots.forEach(slot => {
                 let cls = 'slot-free';
