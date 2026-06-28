@@ -1,175 +1,156 @@
+/* =========================================================
+   PARKING FULL NOTICE - DIGABUNG KE script.js
+   Banner muncul di atas area slot parkir, tanpa popup.
+   ========================================================= */
+(function () {
+    function injectParkingFullStyle() {
+        if (document.getElementById('parking-full-notice-style')) return;
+        const style = document.createElement('style');
+        style.id = 'parking-full-notice-style';
+        style.textContent = `
+            .parking-full-banner {
+                display: flex;
+                align-items: center;
+                gap: 14px;
+                width: 100%;
+                padding: 16px 18px;
+                margin: 0 0 18px 0;
+                border-radius: 18px;
+                background: linear-gradient(135deg, #dc2626, #991b1b);
+                color: #ffffff;
+                box-shadow: 0 12px 30px rgba(220, 38, 38, .28);
+                border: 1px solid rgba(255,255,255,.25);
+                animation: parkingFullPulse 1.3s ease-in-out infinite alternate;
+            }
+            .parking-full-banner.d-none { display: none !important; }
+            .parking-full-icon {
+                width: 48px;
+                height: 48px;
+                min-width: 48px;
+                border-radius: 999px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background: rgba(255,255,255,.18);
+                font-size: 24px;
+                animation: parkingFullShake .85s ease-in-out infinite;
+            }
+            .parking-full-title {
+                font-size: 18px;
+                font-weight: 900;
+                letter-spacing: .5px;
+                line-height: 1.1;
+            }
+            .parking-full-subtitle {
+                font-size: 13px;
+                opacity: .95;
+                margin-top: 4px;
+            }
+            .parking-full-area .slot-card,
+            .parking-full-area [id^="slot-box-"] {
+                animation: slotFullGlow 1.2s ease-in-out infinite alternate;
+            }
+            @keyframes parkingFullPulse {
+                from { transform: translateY(0); box-shadow: 0 12px 30px rgba(220, 38, 38, .25); }
+                to { transform: translateY(-2px); box-shadow: 0 16px 38px rgba(220, 38, 38, .45); }
+            }
+            @keyframes parkingFullShake {
+                0%, 100% { transform: rotate(0deg); }
+                25% { transform: rotate(-5deg); }
+                75% { transform: rotate(5deg); }
+            }
+            @keyframes slotFullGlow {
+                from { box-shadow: 0 0 0 rgba(220, 38, 38, 0); }
+                to { box-shadow: 0 0 22px rgba(220, 38, 38, .55); }
+            }
+            @media (max-width: 576px) {
+                .parking-full-banner { padding: 14px; gap: 10px; border-radius: 15px; }
+                .parking-full-icon { width: 42px; height: 42px; min-width: 42px; font-size: 20px; }
+                .parking-full-title { font-size: 15px; }
+                .parking-full-subtitle { font-size: 12px; }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    function ensureBanner() {
+        injectParkingFullStyle();
+
+        let banner = document.getElementById('parking-full-banner');
+        const slotArea = document.getElementById('slot-area-container');
+
+        if (!banner && slotArea && slotArea.parentNode) {
+            banner = document.createElement('div');
+            banner.id = 'parking-full-banner';
+            banner.className = 'parking-full-banner d-none';
+            banner.innerHTML = `
+                <div class="parking-full-icon"><i class="fas fa-triangle-exclamation"></i></div>
+                <div class="parking-full-text">
+                    <div class="parking-full-title">SLOT PARKIR PENUH</div>
+                    <div class="parking-full-subtitle">Semua slot sedang terisi atau sudah direservasi. QR masuk akan ditolak dan palang tetap tertutup.</div>
+                </div>
+            `;
+            slotArea.parentNode.insertBefore(banner, slotArea);
+        }
+
+        return banner;
+    }
+
+    function isFreeSlot(slot) {
+        const state = String(slot && slot.state ? slot.state : '').toLowerCase().trim();
+        return state === 'kosong' || state === 'tersedia' || state === 'free' || state === 'slot-free';
+    }
+
+    function update(isFull, used, total, mode) {
+        const banner = ensureBanner();
+        const slotArea = document.getElementById('slot-area-container');
+        const body = document.body;
+
+        if (!banner) return;
+
+        if (isFull) {
+            banner.classList.remove('d-none');
+            banner.classList.add('parking-full-show');
+            if (slotArea) slotArea.classList.add('parking-full-area');
+            if (body) body.classList.add('parking-full-active');
+
+            const subtitle = banner.querySelector('.parking-full-subtitle');
+            if (subtitle) {
+                const info = total ? `Kapasitas penuh (${used}/${total}).` : 'Kapasitas penuh.';
+                subtitle.textContent = `${info} QR masuk akan ditolak dan palang tetap tertutup.`;
+            }
+        } else {
+            banner.classList.add('d-none');
+            banner.classList.remove('parking-full-show');
+            if (slotArea) slotArea.classList.remove('parking-full-area');
+            if (body) body.classList.remove('parking-full-active');
+        }
+    }
+
+    function updateFromSlots(slots, mode) {
+        if (!Array.isArray(slots) || slots.length === 0) {
+            update(false, 0, 0, mode);
+            return;
+        }
+
+        const total = slots.length;
+        const used = slots.filter(slot => !isFreeSlot(slot)).length;
+        update(total > 0 && used >= total, used, total, mode);
+    }
+
+    window.ParkingFullNotice = {
+        update,
+        updateFromSlots,
+        isFreeSlot
+    };
+})();
+
 let liveSlotInterval = null;
 let userLiveInterval = null;
 let timerInterval = null;
 let liveTimeLeft = 0;
 let liveSlotLoading = false;
 let userLiveLoading = false;
-let parkingFullNoticeShown = false;
-
-// ===============================
-// NOTIFIKASI SLOT PARKIR PENUH
-// ===============================
-function injectParkingFullNoticeStyle() {
-    if (document.getElementById('parking-full-notice-style')) return;
-
-    const style = document.createElement('style');
-    style.id = 'parking-full-notice-style';
-    style.innerHTML = `
-        .parking-full-notice {
-            position: relative;
-            overflow: hidden;
-            border-radius: 18px;
-            padding: 16px 18px;
-            margin-bottom: 18px;
-            background: linear-gradient(135deg, #dc3545, #7a0f19);
-            color: #fff;
-            box-shadow: 0 14px 35px rgba(220, 53, 69, 0.32);
-            animation: parkingFullPulse 1.2s infinite alternate;
-        }
-
-        .parking-full-notice.d-none {
-            display: none !important;
-        }
-
-        .parking-full-notice::before {
-            content: "";
-            position: absolute;
-            inset: 0;
-            background: linear-gradient(120deg, transparent, rgba(255,255,255,.28), transparent);
-            transform: translateX(-100%);
-            animation: parkingFullShine 2s infinite;
-        }
-
-        .parking-full-notice-content {
-            position: relative;
-            z-index: 2;
-            display: flex;
-            align-items: center;
-            gap: 14px;
-        }
-
-        .parking-full-notice-icon {
-            width: 52px;
-            height: 52px;
-            border-radius: 50%;
-            background: rgba(255,255,255,.18);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 24px;
-            animation: parkingFullShake .7s infinite;
-        }
-
-        .parking-full-notice-title {
-            margin: 0;
-            font-weight: 900;
-            letter-spacing: .6px;
-            text-transform: uppercase;
-        }
-
-        .parking-full-notice-text {
-            margin: 2px 0 0;
-            font-size: 13px;
-            opacity: .95;
-        }
-
-        .slot-card.slot-full-glow {
-            animation: slotFullGlow 1s infinite alternate;
-        }
-
-        @keyframes parkingFullPulse {
-            from { transform: scale(1); }
-            to { transform: scale(1.01); }
-        }
-
-        @keyframes parkingFullShine {
-            0% { transform: translateX(-100%); }
-            55%, 100% { transform: translateX(100%); }
-        }
-
-        @keyframes parkingFullShake {
-            0%, 100% { transform: rotate(0deg); }
-            25% { transform: rotate(-8deg); }
-            75% { transform: rotate(8deg); }
-        }
-
-        @keyframes slotFullGlow {
-            from { box-shadow: 0 0 0 rgba(220,53,69,0); }
-            to { box-shadow: 0 0 22px rgba(220,53,69,.55); }
-        }
-    `;
-    document.head.appendChild(style);
-}
-
-function ensureParkingFullNoticeElement() {
-    injectParkingFullNoticeStyle();
-
-    let notice = document.getElementById('parking-full-notice');
-    if (notice) return notice;
-
-    const slotContainer = document.getElementById('slot-area-container');
-    if (!slotContainer || !slotContainer.parentNode) return null;
-
-    notice = document.createElement('div');
-    notice.id = 'parking-full-notice';
-    notice.className = 'parking-full-notice d-none';
-    notice.innerHTML = `
-        <div class="parking-full-notice-content">
-            <div class="parking-full-notice-icon">
-                <i class="fas fa-exclamation-triangle"></i>
-            </div>
-            <div>
-                <h5 class="parking-full-notice-title">Slot Parkir Penuh</h5>
-                <p class="parking-full-notice-text">
-                    Semua slot sedang terisi atau sudah direservasi. Reservasi baru dan akses masuk kendaraan ditolak sementara.
-                </p>
-            </div>
-        </div>
-    `;
-
-    slotContainer.parentNode.insertBefore(notice, slotContainer);
-    return notice;
-}
-
-function isSlotUnavailable(slot) {
-    return slot && slot.state !== 'kosong';
-}
-
-function updateParkingFullNotice(slots) {
-    if (!Array.isArray(slots) || slots.length === 0) return;
-
-    const isFull = slots.every(isSlotUnavailable);
-    const notice = ensureParkingFullNoticeElement();
-
-    if (notice) {
-        notice.classList.toggle('d-none', !isFull);
-    }
-
-    document.querySelectorAll('.slot-card').forEach(card => {
-        card.classList.toggle('slot-full-glow', isFull);
-    });
-
-    if (isFull && !parkingFullNoticeShown) {
-        parkingFullNoticeShown = true;
-
-        if (typeof Swal !== 'undefined') {
-            Swal.fire({
-                icon: 'warning',
-                title: 'Slot Parkir Penuh',
-                html: 'Semua slot sedang terisi atau direservasi.<br><b>Palang masuk tidak akan terbuka.</b>',
-                timer: 3500,
-                showConfirmButton: false,
-                toast: true,
-                position: 'top-end'
-            });
-        }
-    }
-
-    if (!isFull) {
-        parkingFullNoticeShown = false;
-    }
-}
-
 
 // ===============================
 // SLOT REALTIME
@@ -227,6 +208,10 @@ async function fetchLiveSlots() {
                 `;
             }
         });
+
+        if (window.ParkingFullNotice && typeof window.ParkingFullNotice.updateFromSlots === 'function') {
+            window.ParkingFullNotice.updateFromSlots(slots, 'user');
+        }
 
     } catch (e) {
         // Gagal ambil slot diabaikan agar UI tidak berat
@@ -326,7 +311,7 @@ function stopUserPolling() {
     }
 }
 
-if (document.getElementById('slot-area-container')) {
+if (!window.SMARTPARKING_NOTICE_ONLY && document.getElementById('slot-area-container')) {
     startUserPolling();
 
     document.addEventListener("visibilitychange", () => {
