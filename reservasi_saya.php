@@ -4,6 +4,9 @@ require 'db_config.php';
 require_once 'mqtt_config.php';
 date_default_timezone_set('Asia/Jakarta');
 
+// Auto release reservasi: 5 menit = 300 detik
+const AUTO_RELEASE_SECONDS = 300;
+
 if (!isset($_SESSION['user_id'])) { 
     header("Location: login.php"); 
     exit; 
@@ -61,8 +64,45 @@ $uid = $_SESSION['user_id'];
 
 <script>
     const USER_ID = "<?= $uid ?>";
+    const AUTO_RELEASE_SECONDS = 300;
 
     let loadingTickets = false;
+    let localTicketTimer = null;
+    let ticketTimeLeft = 0;
+
+    function formatTicketCountdown(seconds) {
+        seconds = Math.max(0, parseInt(seconds || 0));
+        const m = Math.floor(seconds / 60);
+        const s = seconds % 60;
+        return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    }
+
+    function updateTicketCountdownDisplay() {
+        const timerEls = document.querySelectorAll('[data-ticket-countdown]');
+        timerEls.forEach(el => {
+            if (ticketTimeLeft > 0) {
+                el.innerText = formatTicketCountdown(ticketTimeLeft);
+            } else {
+                el.innerText = '00:00';
+                const badge = el.closest('.ticket-countdown-badge');
+                if (badge) {
+                    badge.classList.remove('bg-danger');
+                    badge.classList.add('bg-secondary');
+                    badge.innerHTML = `<i class="fas fa-clock me-1"></i> Hangus / Batal`;
+                }
+            }
+        });
+    }
+
+    function startLocalTicketTimer() {
+        if (localTicketTimer) return;
+        localTicketTimer = setInterval(() => {
+            if (ticketTimeLeft > 0) {
+                ticketTimeLeft--;
+                updateTicketCountdownDisplay();
+            }
+        }, 1000);
+    }
 
     async function fetchMyTickets() {
         if (loadingTickets) return;
@@ -70,10 +110,12 @@ $uid = $_SESSION['user_id'];
         try {
             let res = await fetch(`api.php?action=get_user_live_data&uid=${USER_ID}&_=${Date.now()}`);
             let data = await res.json();
+            ticketTimeLeft = parseInt(data.time_left || 0);
+            startLocalTicketTimer();
             
             let container = document.getElementById('ticket-container');
             
-            if (data.tiket.length === 0) {
+            if (!data.tiket || data.tiket.length === 0) {
                 container.innerHTML = `<div class="col-12 text-center py-5">
                     <i class="fas fa-box-open fa-4x text-muted mb-3 opacity-50"></i>
                     <h5 class="fw-bold text-muted">Belum ada reservasi aktif</h5>
@@ -90,12 +132,9 @@ $uid = $_SESSION['user_id'];
                     : `<div class="position-absolute top-0 end-0 bg-danger text-white px-3 py-1 fw-bold border-bottom border-start" style="border-radius: 0 16px 0 16px; font-size: 0.8rem;">SEDANG PARKIR</div>`;
 
                 let timerHtml = '';
-                if (t.status === 'pending' && data.time_left > 0) {
-                    let m = Math.floor(data.time_left / 60);
-                    let s = data.time_left % 60;
-                    let textWaktu = "0" + m + ":" + (s < 10 ? "0"+s : s);
-                    timerHtml = `<div class="mb-3"><span class="badge bg-danger rounded-pill px-3 py-2 fw-normal shadow-sm"><i class="fas fa-clock me-1"></i> Hangus dalam: <span class="fw-bold">${textWaktu}</span></span></div>`;
-                } else if (t.status === 'pending' && data.time_left <= 0) {
+                if (t.status === 'pending' && ticketTimeLeft > 0) {
+                    timerHtml = `<div class="mb-3"><span class="badge bg-danger rounded-pill px-3 py-2 fw-normal shadow-sm ticket-countdown-badge"><i class="fas fa-clock me-1"></i> Hangus dalam: <span class="fw-bold" data-ticket-countdown="1">${formatTicketCountdown(ticketTimeLeft)}</span></span><div class="small text-muted mt-2">Batas check-in maksimal 5 menit setelah reservasi.</div></div>`;
+                } else if (t.status === 'pending' && ticketTimeLeft <= 0) {
                     timerHtml = `<div class="mb-3"><span class="badge bg-secondary rounded-pill px-3 py-2 fw-normal shadow-sm"><i class="fas fa-clock me-1"></i> Hangus / Batal</span></div>`;
                 }
 
@@ -129,9 +168,6 @@ $uid = $_SESSION['user_id'];
         }
     }
     
-    let localTicketTimer = null;
-    let ticketTimeLeft = 0;
-
     function startTicketRealtime() {
         fetchMyTickets();
 
