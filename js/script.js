@@ -1,7 +1,3 @@
-/* =========================================================
-   PARKING FULL NOTICE - DIGABUNG KE script.js
-   Banner muncul di atas area slot parkir, tanpa popup.
-   ========================================================= */
 (function () {
     function injectParkingFullStyle() {
         if (document.getElementById('parking-full-notice-style')) return;
@@ -146,7 +142,7 @@
 })();
 
 let liveSlotInterval = null;
-let userLiveInterval = null;
+// userLiveInterval dihapus agar tidak bentrok dengan dashboard.php yang punya variable inline sendiri.
 let timerInterval = null;
 let liveTimeLeft = 0;
 let liveSlotLoading = false;
